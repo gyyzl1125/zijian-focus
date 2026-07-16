@@ -190,6 +190,7 @@ const els = {
   memoBody: document.querySelector("#memoBody"),
   memoSubmitButton: document.querySelector("#memoSubmitButton"),
   memoCancelEditButton: document.querySelector("#memoCancelEditButton"),
+  memoDeleteButton: document.querySelector("#memoDeleteButton"),
   memoSearch: document.querySelector("#memoSearch"),
   memoTags: document.querySelector("#memoTags"),
   memoList: document.querySelector("#memoList"),
@@ -2164,10 +2165,49 @@ function updateMemo(id, title, tag, body) {
   renderFocusFeed();
 }
 
+function deleteMemoById(memoId, deletedAt) {
+  const id = memoId === undefined || memoId === null ? "" : String(memoId);
+  const timestamp = Number(deletedAt);
+  if (!id.trim() || ["__proto__", "prototype", "constructor"].includes(id)) {
+    return { ok: false, reason: "invalid-memo-id", deletedId: null };
+  }
+  if (!Number.isFinite(timestamp)) return { ok: false, reason: "invalid-deleted-at", deletedId: null };
+  const memo = (Array.isArray(state.memos) ? state.memos : []).find((item) => String(item?.id) === id);
+  if (!memo) return { ok: false, reason: "memo-not-found", deletedId: null };
+
+  const deletions = normalizeDeletionRegistry(state.deletions);
+  const previous = Number(deletions.memos[id]?.deletedAt);
+  deletions.memos[id] = {
+    deletedAt: Number.isFinite(previous) ? Math.max(previous, timestamp) : timestamp,
+  };
+  const previousDeletions = state.deletions;
+  const previousMemos = state.memos;
+  const previousSyncUpdatedAt = state.syncUpdatedAt;
+  state.deletions = deletions;
+  state.memos = filterDeletedEntities(state.memos, { [id]: deletions.memos[id] });
+  try {
+    const result = saveState();
+    if (result === false) throw new Error("saveState returned false");
+  } catch (error) {
+    console.error("Memo deletion failed:", error);
+    state.deletions = previousDeletions;
+    state.memos = previousMemos;
+    state.syncUpdatedAt = previousSyncUpdatedAt;
+    return { ok: false, reason: "save-failed", deletedId: null };
+  }
+  memoExportIds.delete(memo.id);
+  memoExportIds.delete(id);
+  renderMemos();
+  renderFocusFeed();
+  if (els.memoExportSheet && !els.memoExportSheet.hidden) renderMemoExportSheet();
+  return { ok: true, reason: null, deletedId: id };
+}
+
 function showMemoEditor(mode = "add") {
   els.memoEditorTitle.textContent = mode === "edit" ? "修改备忘" : "添加备忘";
   els.memoSubmitButton.textContent = mode === "edit" ? "保存修改" : "记下";
   els.memoCancelEditButton.hidden = mode !== "edit";
+  els.memoDeleteButton.hidden = mode !== "edit";
   els.memoEditorSheet.hidden = false;
   requestAnimationFrame(() => els.memoTitle.focus());
 }
@@ -2201,9 +2241,28 @@ function cancelEditMemo() {
   els.memoTitle.value = "";
   els.memoCustomTag.value = "";
   els.memoBody.value = "";
+  els.memoTag.value = state.selectedMemoTag !== "全部" && state.memoTags.includes(state.selectedMemoTag)
+    ? state.selectedMemoTag
+    : state.memoTags[0] || "其他";
   els.memoSubmitButton.textContent = "记下";
   els.memoCancelEditButton.hidden = true;
+  els.memoDeleteButton.hidden = true;
   hideMemoEditor();
+}
+
+function confirmDeleteEditingMemo() {
+  const memo = state.memos.find((item) => String(item.id) === String(editingMemoId || ""));
+  if (!memo) return false;
+  const confirmed = window.confirm(`确定删除备忘“${String(memo.title || "未命名备忘")}”吗？删除后将不再出现在备忘和专注轮播中。`);
+  if (!confirmed) return false;
+  const result = deleteMemoById(memo.id, Date.now());
+  if (!result.ok) {
+    showReminderToast("删除失败", "请稍后重试。");
+    return false;
+  }
+  cancelEditMemo();
+  showReminderToast("备忘已删除", "该备忘已从备忘和专注轮播中移除。");
+  return true;
 }
 
 function toggleMemo(id) {
@@ -4393,6 +4452,7 @@ els.memoForm.addEventListener("submit", (event) => {
   hideMemoEditor();
 });
 els.memoCancelEditButton.addEventListener("click", cancelEditMemo);
+els.memoDeleteButton.addEventListener("click", confirmDeleteEditingMemo);
 els.memoAddOpenButton.addEventListener("click", openNewMemoEditor);
 els.memoEditorBackdrop.addEventListener("click", cancelEditMemo);
 els.memoEditorClose.addEventListener("click", cancelEditMemo);

@@ -363,6 +363,7 @@ test("task and DDL text open details while checkbox changes do not", () => {
 
 test("task deletion UI is isolated from memo deletion and uses the existing event sheet", () => {
   assert.match(indexSource, /id="eventSheetDeleteButton"[^>]*hidden>删除任务<\/button>/);
-  assert.doesNotMatch(appSource, /function deleteMemoById|eventSheetDeleteMemo/);
+  assert.match(appSource, /function deleteMemoById/);
+  assert.doesNotMatch(appSource, /eventSheetDeleteMemo/);
   assert.match(appSource, /els\.eventSheetDeleteButton\.addEventListener\("click", confirmDeleteEventTask\)/);
 });

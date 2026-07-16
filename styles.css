@@ -1871,6 +1871,31 @@ body[data-skin="night"] .scene {
   grid-column: 1 / -1;
 }
 
+.memo-delete-button {
+  grid-column: 1 / -1;
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid #c23b3b;
+  border-radius: 12px;
+  background: #fff1f1;
+  color: #9d2424;
+  font: inherit;
+  font-weight: 900;
+}
+
+.memo-delete-button[hidden] {
+  display: none;
+}
+
+.memo-delete-button:hover {
+  background: #ffe5e5;
+}
+
+.memo-delete-button:focus-visible {
+  outline: 3px solid rgba(194, 59, 59, 0.28);
+  outline-offset: 3px;
+}
+
 .memo-tags {
   display: flex;
   gap: 8px;
@@ -4140,7 +4165,8 @@ body[data-skin="night"] .scene {
   }
 
   .memo-form .add-task-button,
-  .memo-cancel-edit {
+  .memo-cancel-edit,
+  .memo-delete-button {
     grid-column: 1 / -1;
   }
 
