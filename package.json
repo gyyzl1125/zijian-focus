@@ -1,0 +1,24 @@
+{
+  "name": "zijian-focus",
+  "version": "0.1.0",
+  "private": true,
+  "description": "自见专注与日程安卓应用原型",
+  "scripts": {
+    "start": "python -m http.server 5174 --bind 0.0.0.0",
+    "cap:add:android": "cap add android",
+    "cap:copy": "cap copy android",
+    "android:build": "cd android && gradlew.bat assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.4.3",
+    "@capacitor/core": "^7.4.3",
+    "@capacitor/filesystem": "^7.1.8",
+    "@capacitor/local-notifications": "^7.0.7",
+    "@capacitor/share": "^7.0.4",
+    "fflate": "^0.8.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.4.3",
+    "linkedom": "^0.18.12"
+  }
+}

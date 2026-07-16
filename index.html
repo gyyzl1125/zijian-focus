@@ -1,0 +1,612 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#111111" />
+    <title>自见</title>
+    <link rel="manifest" href="./manifest.webmanifest?v=52" />
+    <link rel="icon" href="./icon.svg?v=52" />
+    <link rel="stylesheet" href="./styles.css?v=52" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="hero">
+        <div class="streak-pill" id="streakPill">
+          <span class="streak-flame" aria-hidden="true"></span>
+          <strong><span id="streakDays">0</span> 天连续专注</strong>
+          <small id="streakHint">完成一次专注后点亮火苗</small>
+        </div>
+      </header>
+
+      <section class="app-view is-active" id="homeView" data-view="home" aria-label="首页">
+        <section class="home-dashboard">
+          <div class="home-date-header">
+            <div>
+              <p class="eyebrow">Today</p>
+              <h1 id="homeDate">今日</h1>
+            </div>
+            <span>今日概览</span>
+          </div>
+          <div class="home-metrics" aria-label="今日概览">
+            <article class="metric-card metric-primary"><span>今日专注</span><strong id="homeTodayMinutes">0</strong><small>分钟</small></article>
+            <article class="metric-card"><span>连续天数</span><strong id="homeStreakDays">0</strong><small>天</small></article>
+            <article class="metric-card"><span>今日任务</span><strong id="homeTaskCount">0</strong><small>项待办</small></article>
+            <article class="metric-card"><span>火苗</span><strong id="homeFlames">0</strong><small>可用</small></article>
+          </div>
+          <article class="daily-plan-card" id="dailyPlanCard">
+            <div class="daily-plan-head">
+              <div><p class="eyebrow">Daily compass</p><h2>今日编排</h2></div>
+              <span id="dailyPlanStatus">尚未生成</span>
+            </div>
+            <div class="daily-plan-content" id="dailyPlanContent">
+              <div class="daily-plan-empty">
+                <strong>把散落的一天，轻轻排成可以完成的样子。</strong>
+                <p>结合任务、课程、DDL、专注与近期节奏，生成三个重点和合适的专注时段。</p>
+              </div>
+            </div>
+            <div class="daily-plan-actions">
+              <button class="daily-plan-generate" id="dailyPlanGenerateButton" type="button">为我编排今天</button>
+              <button class="ghost-button" id="dailyPlanAdoptButton" type="button" hidden>采用到日程</button>
+            </div>
+          </article>
+          <article class="next-card">
+            <div class="section-heading"><div><p class="eyebrow">Up next</p><h2>接下来</h2></div><button type="button" data-view-target="timeline">查看日程</button></div>
+            <div id="homeNextItem"></div>
+          </article>
+          <button class="home-add-task" type="button" data-view-target="tasks"><span>+</span><strong>添加今天的任务</strong><small>安排一件明确的小事</small></button>
+        </section>
+      </section>
+
+      <section class="app-view" id="focusView" data-view="focus" aria-label="专注">
+        <section class="timer-panel" aria-label="专注计时">
+          <div class="scene" id="scene">
+            <button class="sun" id="sunButton" type="button" aria-label="切换天气"></button>
+            <button class="cloud cloud-one" type="button" aria-label="逗一下白云"></button>
+            <button class="cloud cloud-two" type="button" aria-label="逗一下白云"></button>
+            <div class="seed-layer" id="seedLayer" aria-hidden="true"></div>
+            <div class="garden-bed">
+              <div class="grass-patch" id="grassPatch" aria-hidden="true">
+                <span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+                <span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+              </div>
+              <div class="plant" id="plant">
+                <span class="stem"></span>
+                <span class="leaf leaf-left"></span>
+                <span class="leaf leaf-right"></span>
+                <span class="flower"></span>
+              </div>
+              <div class="chick" id="chick" role="button" aria-label="逗一下小鸡" tabindex="0">
+                <span class="comb"></span>
+                <span class="body"></span>
+                <span class="wing"></span>
+                <span class="beak"></span>
+                <span class="eye"></span>
+                <span class="cheek"></span>
+                <span class="leg leg-left"></span>
+                <span class="leg leg-right"></span>
+                <span class="shadow"></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="timer-content">
+            <div class="timer-dial" id="timerDial" role="slider" aria-label="选择专注时长" aria-valuemin="5" aria-valuemax="180" aria-valuenow="25" tabindex="0" hidden>
+              <div class="dial-face">
+                <span class="dial-knob" id="dialKnob"></span>
+                <span class="dial-label">专注时长</span>
+                <strong id="dialMinutes">25</strong>
+                <small>分钟</small>
+              </div>
+            </div>
+
+            <label class="range-row">
+              <span>5</span>
+              <input id="minuteRange" type="range" min="5" max="180" step="5" value="25" />
+              <span>180</span>
+            </label>
+
+            <div class="progress-track" aria-hidden="true">
+              <span id="progressBar"></span>
+            </div>
+            <div class="compact-timer-row">
+              <strong id="timeDisplay">25:00</strong>
+              <span id="flameBalanceText">火苗 0</span>
+            </div>
+            <div class="timer-actions">
+              <button class="primary-button" id="startPauseButton">开始</button>
+              <button class="fast-finish-button" id="fastFinishButton" type="button">火苗完成 -5</button>
+              <button class="ghost-button" id="resetButton">重置</button>
+            </div>
+            <p class="timer-note" id="timerNote">拖动横线选择时长，开始后会看到小鸡从破壳长成。</p>
+            <p class="focus-feed" id="focusFeed">写下的感想和待办，会在这里慢慢轮播。</p>
+          </div>
+        </section>
+      </section>
+
+      <section class="app-view" id="tasksView" data-view="tasks" aria-label="任务">
+        <section class="panel schedule-panel" aria-label="任务添加">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Schedule</p>
+              <h2>任务</h2>
+            </div>
+            <div class="panel-actions">
+              <button class="icon-button notify-button" id="notifyButton" type="button" title="开启通知" aria-label="开启通知">
+                <span class="bell-icon" aria-hidden="true"></span>
+              </button>
+              <button class="icon-button notification-test-button" id="testNotificationButton" type="button" title="测试系统提醒">测试</button>
+              <button class="icon-button notification-settings-button" id="notificationSettingsButton" type="button" title="打开系统通知设置">设置</button>
+              <button class="icon-button" id="clearDoneButton" type="button" title="清除已完成">✓</button>
+            </div>
+          </div>
+
+          <form class="task-form" id="taskForm">
+            <input id="taskTitle" type="text" placeholder="添加任务，例如：背单词" autocomplete="off" />
+            <label>
+              <span>开始</span>
+              <input id="taskStart" type="datetime-local" />
+            </label>
+            <label>
+              <span>结束</span>
+              <input id="taskEnd" type="datetime-local" />
+            </label>
+            <label>
+              <span>提醒方式</span>
+              <select id="taskReminderMode">
+                <option value="relative" selected>提前提醒</option>
+                <option value="absolute">指定时间</option>
+              </select>
+            </label>
+            <label id="relativeReminderField">
+              <span>提前多久</span>
+              <select id="taskReminder">
+                <option value="5">提前 5 分钟</option>
+                <option value="15" selected>提前 15 分钟</option>
+                <option value="30">提前 30 分钟</option>
+                <option value="60">提前 1 小时</option>
+                <option value="120">提前 2 小时</option>
+                <option value="180">提前 3 小时</option>
+                <option value="360">提前 6 小时</option>
+                <option value="720">提前 12 小时</option>
+                <option value="1440">提前 1 天</option>
+              </select>
+            </label>
+            <label id="absoluteReminderField" hidden>
+              <span>提醒时间</span>
+              <input id="taskReminderAt" type="datetime-local" />
+            </label>
+            <div class="task-color-picker" id="taskColorPicker" aria-label="选择任务颜色"></div>
+            <button class="add-task-button" type="submit">添加任务</button>
+          </form>
+
+          <ul class="task-list" id="taskList"></ul>
+          <p class="empty-state" id="emptyTasks">还没有安排。可以先放一个有明确结束时间的小任务。</p>
+        </section>
+      </section>
+
+      <section class="app-view" id="timelineView" data-view="timeline" aria-label="时间轴">
+        <section class="timeline-card">
+          <div class="week-strip" id="weekStrip"></div>
+          <div class="timeline-summary">
+            <div>
+              <strong id="timelineDateTitle">今天</strong>
+              <button class="small-add-button" type="button" data-view-target="tasks">+</button>
+            </div>
+            <span id="timelineStats">0次 · 0分钟</span>
+          </div>
+          <ol class="timeline-list" id="timelineList"></ol>
+        </section>
+      </section>
+
+      <section class="app-view" id="weekView" data-view="week" aria-label="周日程">
+        <section class="week-schedule panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Week</p>
+              <h2>周日程</h2>
+            </div>
+            <div class="panel-actions">
+              <button class="icon-button" id="prevWeekButton" type="button" title="上一周">‹</button>
+              <button class="icon-button" id="importIcsButton" type="button">导入</button>
+              <button class="icon-button" id="nextWeekButton" type="button" title="下一周">›</button>
+            </div>
+          </div>
+          <input id="icsFileInput" type="file" accept=".ics,.csv,.json,.txt,text/calendar,text/csv,application/json,text/plain" hidden />
+          <div class="week-range-title" id="weekRangeTitle">本周</div>
+          <div class="week-board" id="weekBoard"></div>
+        </section>
+      </section>
+
+      <section class="app-view" id="ddlView" data-view="ddl" aria-label="DDL">
+        <section class="ddl-panel panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">DDL</p>
+              <h2>截止时间</h2>
+            </div>
+            <button class="small-add-button" type="button" data-view-target="tasks">+</button>
+          </div>
+          <div class="ddl-list" id="ddlList"></div>
+        </section>
+      </section>
+
+      <section class="app-view" id="memoView" data-view="memo" aria-label="备忘录">
+        <section class="memo-panel panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Memo</p>
+              <h2>备忘录</h2>
+            </div>
+            <div class="memo-header-actions">
+              <button class="ghost-button memo-export-button" id="memoExportOpenButton" type="button">导出</button>
+              <button class="small-add-button memo-add-button" id="memoAddOpenButton" type="button" aria-label="添加备忘">+</button>
+            </div>
+          </div>
+          <div class="memo-toolbar">
+            <input id="memoSearch" type="search" placeholder="搜索标题、分类、内容" autocomplete="off" />
+          </div>
+          <div class="memo-tags" id="memoTags"></div>
+          <div class="memo-list" id="memoList"></div>
+        </section>
+      </section>
+
+      <section class="app-view" id="statsView" data-view="stats" aria-label="统计">
+        <section class="panel widget-panel" aria-label="应用内统计">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Stats</p>
+              <h2>数据回顾</h2>
+            </div>
+          </div>
+          <div class="widget-grid">
+            <article class="phone-widget widget-dark">
+              <span>今日专注</span>
+              <strong id="widgetTodayMinutes">0</strong>
+              <small>分钟</small>
+            </article>
+            <article class="phone-widget">
+              <span>本周专注</span>
+              <strong id="widgetWeekMinutes">0</strong>
+              <small>分钟</small>
+            </article>
+            <article class="phone-widget widget-wide">
+              <div>
+                <span>今日待办</span>
+                <strong id="widgetTodayTasks">0</strong>
+              </div>
+              <div class="widget-task-deck" id="widgetTodayTaskDeck" aria-label="待办任务列表">
+                <small id="widgetNextTask">暂无待完成任务</small>
+              </div>
+            </article>
+          </div>
+          <article class="week-chart-card" aria-label="本周专注柱状图">
+            <div class="week-chart-head">
+              <div>
+                <p class="eyebrow">Week</p>
+                <h3>本周专注</h3>
+              </div>
+              <strong id="weekChartTotal">0 分钟</strong>
+            </div>
+            <div class="week-chart" id="weekChart"></div>
+          </article>
+        </section>
+      </section>
+
+      <section class="app-view" id="screenTimeView" data-view="screenTime" aria-label="屏幕使用">
+        <section class="screen-time-page">
+          <div class="screen-time-head">
+            <div><p class="eyebrow">Digital wellbeing</p><h2>屏幕使用</h2><p>看见时间去了哪里，再决定明天怎么用。</p></div>
+            <button class="icon-button" id="usageRefreshButton" type="button" title="刷新使用数据">↻</button>
+          </div>
+          <article class="usage-permission-card" id="usagePermissionCard">
+            <span class="usage-permission-icon">◷</span>
+            <h3>需要使用情况访问权限</h3>
+            <p>自见只在本机读取各应用的使用时长，不会读取应用内容，也不会上传。</p>
+            <button class="primary-button" id="usagePermissionButton" type="button">前往系统授权</button>
+          </article>
+          <div class="usage-dashboard" id="usageDashboard" hidden>
+            <div class="usage-overview-grid">
+              <article class="usage-ring-card">
+                <div class="usage-ring" id="usageRing"><div><strong id="usageTodayMinutes">0分钟</strong><span>今日屏幕</span></div></div>
+              </article>
+              <article class="usage-compare-card">
+                <span>相比昨天</span>
+                <strong id="usageChangeText">持平</strong>
+                <small id="usageYesterdayText">昨天 0 分钟</small>
+              </article>
+            </div>
+            <article class="usage-trend-card">
+              <div class="section-heading"><div><p class="eyebrow">7 days</p><h3>近七天</h3></div></div>
+              <div class="usage-trend" id="usageTrend"></div>
+            </article>
+            <article class="usage-apps-card">
+              <div class="section-heading"><div><p class="eyebrow">Apps</p><h3 id="usageAppsTitle">今天用在哪里</h3></div></div>
+              <div class="usage-app-list" id="usageAppList"></div>
+            </article>
+          </div>
+        </section>
+      </section>
+
+      <section class="app-view" id="financeView" data-view="finance" aria-label="记账">
+        <section class="finance-page">
+          <div class="finance-head">
+            <div><p class="eyebrow">Money journal</p><h2>我的账本</h2><p id="financeMonthLabel">本月花费</p></div>
+            <div class="finance-head-actions">
+              <button class="finance-import-button" id="financeImportButton" type="button">导入账单</button>
+              <button class="finance-add-button" id="financeAddButton" type="button" aria-label="记一笔">＋</button>
+            </div>
+            <input id="financeImportInput" type="file" accept=".xlsx,.csv,.txt,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,text/plain" hidden />
+          </div>
+          <div class="finance-summary-grid">
+            <article class="finance-total-card" id="financeTotalCard" role="button" tabindex="0" aria-label="切换查看本月支出、收入和存钱"><span id="financeTotalLabel">本月支出</span><strong id="financeExpenseTotal">¥0.00</strong><small id="financeIncomeTotal">本月收入 ¥0.00</small></article>
+            <article class="finance-budget-card"><span>月预算</span><strong id="financeBudgetLeft">未设置</strong><i><b id="financeBudgetBar"></b></i><button id="financeBudgetButton" type="button">设置预算</button></article>
+          </div>
+          <div class="finance-period-grid" aria-label="消费周期统计">
+            <article><span id="financeDailyLabel">本月日均支出</span><strong id="financeDailyAverage">¥0.00</strong><small>截至今天</small></article>
+            <article><span id="financeWeeklyLabel">本周支出</span><strong id="financeWeeklyTotal">¥0.00</strong><small id="financeWeekRange">本周</small></article>
+            <article><span id="financeYearlyLabel">本年支出</span><strong id="financeYearlyTotal">¥0.00</strong><small id="financeYearLabel">今年</small></article>
+          </div>
+          <article class="finance-analysis-card">
+            <div class="section-heading"><div><p class="eyebrow">Breakdown</p><h3 id="financeBreakdownTitle">花到哪里了</h3></div></div>
+            <div class="finance-breakdown"><div class="finance-ring" id="financeRing" role="button" tabindex="0" aria-label="点击圆环中的分类，查看该分类本月较大支出"><div><strong id="financeRingTotal">¥0</strong><span id="financeRingLabel">本月</span></div></div><div class="finance-legend" id="financeLegend"></div></div>
+            <div class="finance-category-details" id="financeCategoryDetails" hidden>
+              <div class="finance-category-details-head"><div><span id="financeCategoryDetailsEyebrow">分类明细</span><strong id="financeCategoryDetailsTitle">本月较大支出</strong></div><button id="financeCategoryDetailsClose" type="button" aria-label="关闭分类明细">×</button></div>
+              <div class="finance-category-top-list" id="financeCategoryTopList"></div>
+            </div>
+          </article>
+          <article class="finance-insight" id="financeInsight"><strong>本月建议</strong><p>记下第一笔开销后，这里会给出温和、具体的消费提示。</p></article>
+          <article class="payment-detect-card">
+            <div><strong>付款后提醒记账</strong><p>读取支付宝、微信发布的付款通知，检测到金额后请你确认再入账。</p></div>
+            <div class="payment-detect-actions"><span id="paymentAccessStatus">尚未授权</span><button class="ghost-button" id="paymentAccessButton" type="button">开启识别</button><button class="ghost-button" id="paymentTestButton" type="button">模拟付款测试</button></div>
+          </article>
+          <article class="finance-list-card">
+            <div class="section-heading"><div><p class="eyebrow">Transactions</p><h3>最近流水</h3></div></div>
+            <div class="finance-list" id="financeList"></div>
+          </article>
+        </section>
+      </section>
+
+      <section class="app-view" id="heatmapView" data-view="heatmap" aria-label="热力图">
+        <section class="panel heatmap-panel" aria-label="专注热力图">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Heatmap</p>
+              <h2>专注热力图</h2>
+            </div>
+            <div class="heatmap-controls">
+              <select id="heatmapPalette" aria-label="选择热力图配色">
+                <option value="forest">森林</option>
+                <option value="ocean">海盐</option>
+                <option value="sunset">落日</option>
+                <option value="berry">莓果</option>
+                <option value="mono">黑白</option>
+              </select>
+              <strong id="todayMinutes">0 分钟</strong>
+            </div>
+          </div>
+          <div class="heatmap" id="heatmap"></div>
+          <div class="heatmap-legend">
+            <span>少</span>
+            <i class="level-0"></i>
+            <i class="level-1"></i>
+            <i class="level-2"></i>
+            <i class="level-3"></i>
+            <i class="level-4"></i>
+            <span>多</span>
+          </div>
+          <div class="flame-stats" aria-label="火苗统计">
+            <article>
+              <span>拥有火苗</span>
+              <strong id="flameBalance">0</strong>
+            </article>
+            <article>
+              <span>本周获得</span>
+              <strong id="flameEarnedWeek">0</strong>
+            </article>
+            <article>
+              <span>本周消耗</span>
+              <strong id="flameSpentWeek">0</strong>
+            </article>
+          </div>
+          <article class="skin-card" aria-label="小鸡皮肤">
+            <div class="week-chart-head">
+              <div>
+                <p class="eyebrow">Skins</p>
+                <h3>小鸡皮肤</h3>
+              </div>
+              <strong class="contextual-balance" id="skinFlameText">火苗 0</strong>
+            </div>
+            <div class="skin-grid" id="skinGrid"></div>
+          </article>
+          <article class="skin-card flower-card" aria-label="小花皮肤">
+            <div class="week-chart-head">
+              <div>
+                <p class="eyebrow">Flowers</p>
+                <h3>小花颜色</h3>
+              </div>
+              <strong class="contextual-balance" id="flowerFlameText">火苗 0</strong>
+            </div>
+            <div class="skin-grid flower-grid" id="flowerGrid"></div>
+          </article>
+        </section>
+      </section>
+
+      <section class="app-view" id="settingsView" data-view="settings" aria-label="设置">
+        <section class="panel settings-panel" aria-label="主题与数据">
+          <article class="settings-card sync-card" aria-label="账号与同步">
+            <div class="week-chart-head"><div><p class="eyebrow">Cloud sync</p><h3>账号与同步</h3></div><strong id="syncStatusBadge">未登录</strong></div>
+            <p class="sync-description" id="syncDescription">登录后，任务、备忘、课程、专注记录和账本会在设备间同步。</p>
+            <div class="sync-auth-form" id="syncAuthForm">
+              <input id="syncEmail" type="email" inputmode="email" autocomplete="email" placeholder="邮箱" />
+              <input id="syncPassword" type="password" autocomplete="current-password" minlength="6" placeholder="密码（旧账号可使用原 6 位密码）" />
+              <div><button class="primary-button" id="syncLoginButton" type="button">登录</button><button class="ghost-button" id="syncRegisterButton" type="button">注册</button></div>
+            </div>
+            <div class="sync-account-actions" id="syncAccountActions" hidden>
+              <span id="syncAccountEmail"></span>
+              <div><button class="ghost-button" id="syncNowButton" type="button">立即同步</button><button class="ghost-button" id="syncLogoutButton" type="button">退出登录</button></div>
+            </div>
+          </article>
+          <article class="settings-card" aria-label="主题与数据">
+            <div class="week-chart-head">
+              <div>
+                <p class="eyebrow">Personal</p>
+                <h3>主题与数据</h3>
+              </div>
+              <strong class="contextual-balance" id="themeFlameText">火苗 0</strong>
+            </div>
+            <div class="theme-grid" id="themeGrid"></div>
+            <div class="setting-row">
+              <label><input id="feedMemoToggle" type="checkbox" /> 轮播备忘感想</label>
+              <label><input id="feedTaskToggle" type="checkbox" /> 轮播今日待办</label>
+              <label><input id="feedQuoteToggle" type="checkbox" /> 轮播导入语录</label>
+            </div>
+            <div class="setting-actions">
+              <button class="ghost-button" id="heatmapImageButton" type="button">导入热力图图片</button>
+              <button class="ghost-button" id="heatmapImageResetButton" type="button">重置热力图图片</button>
+              <button class="ghost-button" id="quoteImportButton" type="button">导入语录</button>
+              <button class="ghost-button" id="backupExportButton" type="button">导出备份</button>
+              <button class="ghost-button" id="backupImportButton" type="button">导入备份</button>
+            </div>
+            <input id="heatmapImageInput" type="file" accept="image/*" hidden />
+            <input id="quoteImportInput" type="file" accept=".txt,.docx,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden />
+            <input id="backupImportInput" type="file" accept=".json,application/json" hidden />
+          </article>
+        </section>
+      </section>
+
+      <section class="app-view" id="profileView" data-view="profile" aria-label="我的">
+        <section class="profile-page">
+          <div class="page-intro profile-intro">
+            <div><p class="eyebrow">Library</p><h1>全部功能</h1><p>日程、成长记录和偏好设置。</p></div>
+          </div>
+          <div class="profile-group"><h2>计划与日程</h2><div class="profile-grid">
+            <button type="button" data-view-target="tasks"><span>任务</span><small>添加与提醒</small></button>
+            <button type="button" data-view-target="timeline"><span>时间轴</span><small>今天的节奏</small></button>
+            <button type="button" data-view-target="week"><span>周日程</span><small>课程与安排</small></button>
+            <button type="button" data-view-target="ddl"><span>DDL</span><small>重要截止日</small></button>
+          </div></div>
+          <div class="profile-group"><h2>成长记录</h2><div class="profile-list">
+            <button type="button" data-view-target="stats"><span><strong>统计</strong><small>专注趋势与任务概览</small></span><b>›</b></button>
+            <button type="button" data-view-target="screenTime"><span><strong>屏幕使用</strong><small>应用时长与每日变化</small></span><b>›</b></button>
+            <button type="button" data-view-target="finance"><span><strong>我的账本</strong><small>预算、分类与消费分析</small></span><b>›</b></button>
+            <button type="button" data-view-target="heatmap"><span><strong>热力图与装扮</strong><small>火苗、皮肤和花朵</small></span><b>›</b></button>
+            <button type="button" data-view-target="settings"><span><strong>设置与数据</strong><small>主题、轮播和本地备份</small></span><b>›</b></button>
+          </div></div>
+        </section>
+      </section>
+    </main>
+
+    <div class="reminder-toast" id="reminderToast" role="status" aria-live="polite" hidden>
+      <strong id="reminderToastTitle">任务提醒</strong>
+      <span id="reminderToastBody">有任务快到时间了</span>
+    </div>
+
+    <div class="event-sheet" id="eventSheet" hidden>
+      <button class="event-sheet-backdrop" id="eventSheetBackdrop" type="button" aria-label="关闭详情"></button>
+      <article class="event-sheet-card" role="dialog" aria-modal="true" aria-labelledby="eventSheetTitle">
+        <button class="event-sheet-close" id="eventSheetClose" type="button" aria-label="关闭">×</button>
+        <p class="eyebrow" id="eventSheetType">Event</p>
+        <h3 id="eventSheetTitle">安排详情</h3>
+        <div class="event-sheet-meta" id="eventSheetMeta"></div>
+        <p id="eventSheetDescription"></p>
+      </article>
+    </div>
+
+    <div class="memo-editor-sheet" id="memoEditorSheet" hidden>
+      <button class="event-sheet-backdrop" id="memoEditorBackdrop" type="button" aria-label="关闭备忘编辑"></button>
+      <article class="memo-editor-card" role="dialog" aria-modal="true" aria-labelledby="memoEditorTitle">
+        <button class="event-sheet-close" id="memoEditorClose" type="button" aria-label="关闭">×</button>
+        <p class="eyebrow">Memo</p>
+        <h3 id="memoEditorTitle">添加备忘</h3>
+        <form class="memo-form" id="memoForm">
+          <input id="memoTitle" type="text" placeholder="名称，例如：一部电影、一本书、一件事" autocomplete="off" />
+          <select id="memoTag">
+            <option value="影视音乐">影视音乐</option>
+            <option value="书目">书目</option>
+            <option value="待办">待办</option>
+            <option value="灵感">灵感</option>
+            <option value="其他">其他</option>
+          </select>
+          <input id="memoCustomTag" type="text" placeholder="新标签，可不填" autocomplete="off" />
+          <textarea id="memoBody" rows="4" placeholder="可以写观后感、读后感、摘录，或者提醒自己的细节"></textarea>
+          <button class="add-task-button" id="memoSubmitButton" type="submit">记下</button>
+          <button class="ghost-button memo-cancel-edit" id="memoCancelEditButton" type="button" hidden>取消修改</button>
+        </form>
+      </article>
+    </div>
+
+    <div class="finance-editor-sheet" id="financeEditorSheet" hidden>
+      <button class="event-sheet-backdrop" id="financeEditorBackdrop" type="button" aria-label="关闭记账"></button>
+      <article class="finance-editor-card" role="dialog" aria-modal="true" aria-labelledby="financeEditorTitle">
+        <button class="event-sheet-close" id="financeEditorClose" type="button" aria-label="关闭">×</button>
+        <p class="eyebrow">Transaction</p><h3 id="financeEditorTitle">记一笔</h3>
+        <form id="financeForm" class="finance-form">
+          <div class="finance-type-switch"><button class="is-active" type="button" data-finance-type="expense">支出</button><button type="button" data-finance-type="income">收入</button><button type="button" data-finance-type="saving">存钱</button></div>
+          <label class="finance-amount-field"><span>¥</span><input id="financeAmount" inputmode="decimal" type="number" min="0.01" step="0.01" placeholder="0.00" required /></label>
+          <label><span>分类</span><select id="financeCategory"><option>餐饮</option><option>购物</option><option>交通</option><option>居住</option><option>学习</option><option>游戏</option><option>娱乐</option><option>医疗</option><option>人情</option><option>其他</option><option>存钱</option></select></label>
+          <label><span>用途与备注</span><input id="financeNote" type="text" maxlength="80" placeholder="例如：午饭、电影票" /></label>
+          <label><span>时间</span><input id="financeDate" type="datetime-local" /></label>
+          <button class="primary-button" type="submit">确认入账</button>
+          <button class="ghost-button" id="financeDeleteButton" type="button" hidden>删除这笔</button>
+        </form>
+      </article>
+    </div>
+
+    <div class="memo-export-sheet" id="memoExportSheet" hidden>
+      <button class="event-sheet-backdrop" id="memoExportBackdrop" type="button" aria-label="关闭备忘导出"></button>
+      <article class="memo-export-card" role="dialog" aria-modal="true" aria-labelledby="memoExportTitle">
+        <button class="event-sheet-close" id="memoExportClose" type="button" aria-label="关闭">×</button>
+        <p class="eyebrow">Export</p>
+        <h3 id="memoExportTitle">导出备忘为 TXT</h3>
+        <p class="memo-export-hint">先选分类，再勾选要导出的条目。可以导出一个分类，也可以混合多个分类。</p>
+        <div class="memo-export-tags" id="memoExportTags"></div>
+        <div class="memo-export-list" id="memoExportList"></div>
+        <div class="memo-export-actions">
+          <button class="ghost-button" id="memoExportSelectAll" type="button">全选当前</button>
+          <button class="ghost-button" id="memoExportJson" type="button">导出 JSON</button>
+          <button class="primary-button" id="memoExportDownload" type="button">导出 TXT</button>
+        </div>
+      </article>
+    </div>
+
+    <div class="skin-preview-sheet" id="skinPreviewSheet" hidden>
+      <button class="event-sheet-backdrop" id="skinPreviewBackdrop" type="button" aria-label="关闭皮肤预览"></button>
+      <article class="skin-preview-card" role="dialog" aria-modal="true" aria-labelledby="skinPreviewTitle">
+        <button class="event-sheet-close" id="skinPreviewClose" type="button" aria-label="关闭">×</button>
+        <p class="eyebrow">Preview</p>
+        <h3 id="skinPreviewTitle">小鸡皮肤</h3>
+        <div class="skin-preview-scene" id="skinPreviewScene" data-scene="meadow">
+          <span class="preview-cloud"></span>
+          <span class="preview-sprout"></span>
+          <span class="preview-chick" aria-hidden="true">
+            <i></i>
+            <b></b>
+          </span>
+        </div>
+        <p id="skinPreviewMeta">长按可以先看看效果。</p>
+      </article>
+    </div>
+
+    <div class="complete-sheet" id="completeSheet" hidden>
+      <button class="event-sheet-backdrop" id="completeSheetBackdrop" type="button" aria-label="关闭完成提示"></button>
+      <article class="complete-card" role="dialog" aria-modal="true" aria-labelledby="completeTitle">
+        <span class="complete-badge">Achievement</span>
+        <h3 id="completeTitle">恭喜完成专注</h3>
+        <p id="completeBody">小鸡长成了，草地也亮起来了。</p>
+        <button class="primary-button" id="completeCloseButton" type="button">收下</button>
+      </article>
+    </div>
+
+    <nav class="bottom-nav" aria-label="主导航">
+      <button class="nav-button is-active" type="button" data-view-target="home"><span class="nav-icon">⌂</span><span>首页</span></button>
+      <button class="nav-button" type="button" data-view-target="focus"><span class="nav-icon">◉</span><span>专注</span></button>
+      <button class="nav-button" type="button" data-view-target="memo"><span class="nav-icon">□</span><span>备忘</span></button>
+      <button class="nav-button" type="button" data-view-target="profile"><span class="nav-icon">○</span><span>我的</span></button>
+    </nav>
+
+    <script src="./capacitor.js"></script>
+    <script src="./fflate.min.js?v=52"></script>
+    <script src="./app.js?v=52"></script>
+  </body>
+</html>

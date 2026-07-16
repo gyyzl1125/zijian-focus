@@ -1,0 +1,8 @@
+{
+  "appId": "com.zijian.focus",
+  "appName": "自见",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  }
+}

@@ -1,0 +1,26 @@
+node_modules/
+android/.gradle/
+android/app/build/
+android/build/
+android/local.properties
+local.properties
+android/release-signing.properties
+*.jks
+*.key
+*.pem
+*.keystore
+*.p12
+*.pfx
+*.apk
+*.aab
+.env
+.env.*
+!.env.example
+ui skill/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+supabase/.temp/
+supabase/.branches/
+*.log

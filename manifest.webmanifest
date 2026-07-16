@@ -1,0 +1,17 @@
+{
+  "name": "自见",
+  "short_name": "自见",
+  "description": "集成专注计时、日程安排和专注热力图的轻量应用。",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#f3f6ec",
+  "theme_color": "#111111",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
