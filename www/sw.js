@@ -1,10 +1,11 @@
-const CACHE_NAME = "zijian-focus-v52";
+const CACHE_NAME = "zijian-focus-v54";
 const ASSETS = [
   "./",
-  "./index.html?v=52",
-  "./styles.css?v=52",
+  "./index.html",
+  "./styles.css?v=53",
   "./fflate.min.js?v=52",
-  "./app.js?v=52",
+  "./daily-planner.js?v=53",
+  "./app.js?v=53",
   "./manifest.webmanifest?v=52",
   "./icon.svg?v=52",
 ];
@@ -25,7 +26,7 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.mode === "navigate") {
-    event.respondWith(fetch(event.request).catch(() => caches.match("./index.html?v=52")));
+    event.respondWith(fetch(event.request).catch(() => caches.match("./index.html")));
     return;
   }
 

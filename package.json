@@ -12,9 +12,14 @@
     "test:task-deletion": "node --test tests/task-deletion.test.cjs",
     "test:memo-deletion": "node --test tests/memo-deletion.test.cjs",
     "test:planner-schedule": "node --test tests/planner-schedule.test.cjs",
+    "test:web-assets": "node --test tests/web-assets.test.cjs",
+    "web:prepare": "node scripts/prepare-web.cjs prepare",
+    "web:check": "node scripts/prepare-web.cjs check",
     "cap:add:android": "cap add android",
     "cap:copy": "cap copy android",
-    "android:build": "cd android && gradlew.bat assembleDebug"
+    "cap:sync": "cap sync android",
+    "android:prepare": "npm run web:prepare && npm run web:check && npm run cap:sync",
+    "android:build": "npm run android:prepare && cd android && gradlew.bat assembleDebug"
   },
   "dependencies": {
     "@capacitor/android": "^7.4.3",

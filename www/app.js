@@ -105,12 +105,20 @@ const defaultState = {
   selectedTheme: "paper",
   transactions: [],
   monthlyBudget: 0,
+  dailyPlans: {},
+  deletions: { version: 1, tasks: {}, memos: {} },
 };
 
 let state = loadState();
 normalizeState();
 saveState(false);
 let tickHandle = null;
+let dailyPlanPreview = null;
+let dailyPlanPreviewError = null;
+let dailyPlanGenerating = false;
+let dailyPlanAdopting = false;
+let dailyPlanAdoptionError = null;
+let dailyPlanPreviewNeedsRegeneration = false;
 
 const els = {
   scene: document.querySelector("#scene"),
@@ -182,6 +190,7 @@ const els = {
   memoBody: document.querySelector("#memoBody"),
   memoSubmitButton: document.querySelector("#memoSubmitButton"),
   memoCancelEditButton: document.querySelector("#memoCancelEditButton"),
+  memoDeleteButton: document.querySelector("#memoDeleteButton"),
   memoSearch: document.querySelector("#memoSearch"),
   memoTags: document.querySelector("#memoTags"),
   memoList: document.querySelector("#memoList"),
@@ -232,6 +241,7 @@ const els = {
   eventSheetTitle: document.querySelector("#eventSheetTitle"),
   eventSheetMeta: document.querySelector("#eventSheetMeta"),
   eventSheetDescription: document.querySelector("#eventSheetDescription"),
+  eventSheetDeleteButton: document.querySelector("#eventSheetDeleteButton"),
   skinPreviewSheet: document.querySelector("#skinPreviewSheet"),
   skinPreviewBackdrop: document.querySelector("#skinPreviewBackdrop"),
   skinPreviewClose: document.querySelector("#skinPreviewClose"),
@@ -249,6 +259,12 @@ const els = {
   homeTaskCount: document.querySelector("#homeTaskCount"),
   homeFlames: document.querySelector("#homeFlames"),
   homeNextItem: document.querySelector("#homeNextItem"),
+  dailyPlanCard: document.querySelector("#dailyPlanCard"),
+  dailyPlanStatus: document.querySelector("#dailyPlanStatus"),
+  dailyPlanContent: document.querySelector("#dailyPlanContent"),
+  dailyPlanGenerateButton: document.querySelector("#dailyPlanGenerateButton"),
+  dailyPlanAdoptButton: document.querySelector("#dailyPlanAdoptButton"),
+  dailyPlanNextStage: document.querySelector("#dailyPlanNextStage"),
   profileFlames: document.querySelector("#profileFlames"),
   usagePermissionCard: document.querySelector("#usagePermissionCard"),
   usagePermissionButton: document.querySelector("#usagePermissionButton"),
@@ -344,6 +360,7 @@ let financeSummaryMode = "expense";
 let pendingPaymentActive = false;
 let selectedFinanceCategory = null;
 let financeRingSegments = [];
+let eventDetailTaskId = null;
 let syncSession = loadSyncSession();
 let syncUploadTimer = null;
 let syncInFlight = false;
@@ -377,7 +394,60 @@ function loadState() {
   return { ...defaultState };
 }
 
+function normalizeDeletionMap(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const normalized = {};
+  Object.entries(value).forEach(([rawId, record]) => {
+    const id = String(rawId);
+    if (!id.trim() || ["__proto__", "prototype", "constructor"].includes(id)) return;
+    if (!record || typeof record !== "object" || Array.isArray(record)) return;
+    const deletedAt = record.deletedAt;
+    if (typeof deletedAt !== "number" || !Number.isFinite(deletedAt)) return;
+    normalized[id] = { deletedAt };
+  });
+  return normalized;
+}
+
+function normalizeDeletionRegistry(value) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return {
+    version: 1,
+    tasks: normalizeDeletionMap(source.tasks),
+    memos: normalizeDeletionMap(source.memos),
+  };
+}
+
+function mergeDeletionMaps(localValue, remoteValue) {
+  const local = normalizeDeletionMap(localValue);
+  const remote = normalizeDeletionMap(remoteValue);
+  const merged = { ...local };
+  Object.entries(remote).forEach(([id, record]) => {
+    if (!merged[id] || record.deletedAt > merged[id].deletedAt) merged[id] = { deletedAt: record.deletedAt };
+  });
+  return merged;
+}
+
+function mergeDeletionRegistries(localValue, remoteValue) {
+  const local = normalizeDeletionRegistry(localValue);
+  const remote = normalizeDeletionRegistry(remoteValue);
+  return {
+    version: 1,
+    tasks: mergeDeletionMaps(local.tasks, remote.tasks),
+    memos: mergeDeletionMaps(local.memos, remote.memos),
+  };
+}
+
+function filterDeletedEntities(items, deletionMap) {
+  const activeDeletions = normalizeDeletionMap(deletionMap);
+  return (Array.isArray(items) ? items : []).filter((item) => {
+    if (!item || item.id === undefined || item.id === null) return true;
+    return !Object.prototype.hasOwnProperty.call(activeDeletions, String(item.id));
+  });
+}
+
 function normalizeState() {
+  state.deletions = normalizeDeletionRegistry(state.deletions);
+  state.tasks = filterDeletedEntities(state.tasks, state.deletions.tasks);
   state.flames = Number(state.flames || 0);
   state.flameLedger = Array.isArray(state.flameLedger) ? state.flameLedger : [];
   state.courses = Array.isArray(state.courses) ? state.courses : [];
@@ -387,6 +457,7 @@ function normalizeState() {
     tag: memo.tag === "片子" ? "影视音乐" : memo.tag,
     body: memo.body || "",
   }));
+  state.memos = filterDeletedEntities(state.memos, state.deletions.memos);
   const savedTags = Array.isArray(state.memoTags) ? state.memoTags.map((tag) => tag === "片子" ? "影视音乐" : tag) : [];
   state.memoTags = [...new Set([...DEFAULT_MEMO_TAGS.slice(1), ...savedTags, ...state.memos.map((memo) => memo.tag)])].filter(Boolean);
   if (state.selectedMemoTag === "片子") state.selectedMemoTag = "影视音乐";
@@ -411,6 +482,7 @@ function normalizeState() {
   state.quotes = Array.isArray(state.quotes) ? state.quotes.filter(Boolean).map(String) : [];
   state.heatmapImage = typeof state.heatmapImage === "string" ? state.heatmapImage : "";
   state.transactions = Array.isArray(state.transactions) ? state.transactions : [];
+  state.dailyPlans = state.dailyPlans && typeof state.dailyPlans === "object" && !Array.isArray(state.dailyPlans) ? state.dailyPlans : {};
   if (Number(state.financeRulesVersion || 0) < 4) {
     state.transactions = state.transactions.map((item) => {
       if (item.type === "expense" && /-import$/.test(item.source || "") && isSavingTransfer(item.note)) {
@@ -561,13 +633,27 @@ function mergeById(localItems = [], remoteItems = [], preferRemote = false) {
   return [...merged.values()];
 }
 
+function dailyPlanRevision(plan) {
+  const adoptedAt = Number(plan?.adopted_at);
+  return Number.isFinite(adoptedAt) && adoptedAt > 0 ? adoptedAt : Number(plan?.generated_at || 0);
+}
+
 function mergeSyncedStates(local, remote) {
   const preferRemote = Number(remote?.syncUpdatedAt || 0) > Number(local?.syncUpdatedAt || 0);
   const preferred = preferRemote ? remote : local;
   const merged = { ...local, ...preferred };
-  ["tasks", "courses", "memos", "focusSessions", "flameLedger", "transactions"].forEach((key) => {
+  merged.deletions = mergeDeletionRegistries(local?.deletions, remote?.deletions);
+  ["courses", "focusSessions", "flameLedger", "transactions"].forEach((key) => {
     merged[key] = mergeById(local?.[key], remote?.[key], preferRemote);
   });
+  merged.tasks = filterDeletedEntities(
+    mergeById(local?.tasks, remote?.tasks, preferRemote),
+    merged.deletions.tasks
+  );
+  merged.memos = filterDeletedEntities(
+    mergeById(local?.memos, remote?.memos, preferRemote),
+    merged.deletions.memos
+  );
   merged.memoTags = [...new Set([...(local.memoTags || []), ...(remote.memoTags || [])])];
   merged.ownedSkins = [...new Set([...(local.ownedSkins || []), ...(remote.ownedSkins || [])])];
   merged.ownedFlowers = [...new Set([...(local.ownedFlowers || []), ...(remote.ownedFlowers || [])])];
@@ -575,6 +661,11 @@ function mergeSyncedStates(local, remote) {
   merged.quotes = [...new Set([...(local.quotes || []), ...(remote.quotes || [])])];
   merged.focusByDate = { ...(local.focusByDate || {}) };
   Object.entries(remote.focusByDate || {}).forEach(([day, minutes]) => { merged.focusByDate[day] = Math.max(Number(merged.focusByDate[day] || 0), Number(minutes || 0)); });
+  merged.dailyPlans = { ...(local.dailyPlans || {}), ...(remote.dailyPlans || {}) };
+  Object.entries(local.dailyPlans || {}).forEach(([day, plan]) => {
+    const remotePlan = remote.dailyPlans?.[day];
+    if (!remotePlan || dailyPlanRevision(plan) >= dailyPlanRevision(remotePlan)) merged.dailyPlans[day] = plan;
+  });
   merged.heatmapImage = local.heatmapImage || "";
   ["isRunning", "startedAt", "endsAt", "timerSecondsLeft", "timerTotalSeconds"].forEach((key) => { merged[key] = local[key]; });
   merged.syncUpdatedAt = Math.max(Number(local.syncUpdatedAt || 0), Number(remote.syncUpdatedAt || 0));
@@ -583,6 +674,9 @@ function mergeSyncedStates(local, remote) {
 
 function cloudSafeState() {
   const snapshot = structuredClone(state);
+  snapshot.deletions = normalizeDeletionRegistry(snapshot.deletions);
+  snapshot.tasks = filterDeletedEntities(snapshot.tasks, snapshot.deletions.tasks);
+  snapshot.memos = filterDeletedEntities(snapshot.memos, snapshot.deletions.memos);
   snapshot.heatmapImage = "";
   snapshot.isRunning = false;
   snapshot.startedAt = null;
@@ -1120,17 +1214,115 @@ function toggleTask(id) {
   checkReminders();
 }
 
-function clearDoneTasks() {
-  state.tasks.filter((task) => task.done).forEach((task) => cancelTaskNotification(task).catch(() => {}));
-  state.tasks = state.tasks.filter((task) => !task.done);
-  saveState();
+function dailyPlanReferencesAnyTask(plan, taskIds) {
+  if (!plan || typeof plan !== "object" || Array.isArray(plan)) return false;
+  const references = [
+    ...(Array.isArray(plan.priorities) ? plan.priorities : []),
+    ...(Array.isArray(plan.blocks) ? plan.blocks : []),
+  ];
+  return references.some((item) => item?.taskId !== undefined && item?.taskId !== null && taskIds.has(String(item.taskId)));
+}
+
+function removeDeletedTaskReferencesFromPlans(plans, taskIds, deletedAt, revisedAt = deletedAt) {
+  const source = plans && typeof plans === "object" && !Array.isArray(plans) ? plans : {};
+  const todayKey = dailyPlanDayKey(deletedAt);
+  const nextPlans = { ...source };
+  Object.entries(source).forEach(([dayKeyValue, plan]) => {
+    if (dayKeyValue < todayKey || !dailyPlanReferencesAnyTask(plan, taskIds)) return;
+    const priorities = Array.isArray(plan.priorities) ? plan.priorities : [];
+    const blocks = Array.isArray(plan.blocks) ? plan.blocks : [];
+    const affectedIds = new Set();
+    [...priorities, ...blocks].forEach((item) => {
+      const id = item?.taskId === undefined || item?.taskId === null ? "" : String(item.taskId);
+      if (taskIds.has(id)) affectedIds.add(id);
+    });
+    const warnings = Array.isArray(plan.warnings) ? [...plan.warnings] : [];
+    affectedIds.forEach((taskId) => {
+      const exists = warnings.some((warning) => warning?.code === "TASK_DELETED"
+        && Array.isArray(warning.sourceIds)
+        && warning.sourceIds.some((sourceId) => String(sourceId) === taskId));
+      if (!exists) {
+        warnings.push({
+          code: "TASK_DELETED",
+          severity: "warning",
+          message: "原重点任务已删除，相关专注时段已移除",
+          sourceIds: [taskId],
+        });
+      }
+    });
+    nextPlans[dayKeyValue] = {
+      ...plan,
+      adopted_at: Math.max(Number.isFinite(Number(plan.adopted_at)) ? Number(plan.adopted_at) : 0, revisedAt),
+      priorities: priorities.filter((item) => !taskIds.has(String(item?.taskId))),
+      blocks: blocks.filter((item) => !taskIds.has(String(item?.taskId))),
+      warnings,
+    };
+  });
+  return nextPlans;
+}
+
+function refreshAfterTaskDeletion() {
   renderTasks();
   renderTimeline();
   renderWeekSchedule();
   renderDdl();
   renderWidgets();
   renderFocusFeed();
+  renderHome();
+  renderNotificationButton();
   updatePageBadge();
+}
+
+function deleteTasksByIds(taskIds, deletedAt) {
+  const timestamp = Number(deletedAt);
+  const requestedIds = new Set((Array.isArray(taskIds) ? taskIds : [taskIds])
+    .map((id) => id === undefined || id === null ? "" : String(id))
+    .filter((id) => id.trim() && !["__proto__", "prototype", "constructor"].includes(id)));
+  if (!requestedIds.size) return { ok: false, reason: "invalid-task-id", deletedIds: [] };
+  if (!Number.isFinite(timestamp)) return { ok: false, reason: "invalid-deleted-at", deletedIds: [] };
+  const deletedTasks = (Array.isArray(state.tasks) ? state.tasks : [])
+    .filter((task) => requestedIds.has(String(task?.id)));
+  if (!deletedTasks.length) return { ok: false, reason: "task-not-found", deletedIds: [] };
+
+  const deletedIds = new Set(deletedTasks.map((task) => String(task.id)));
+  const deletions = normalizeDeletionRegistry(state.deletions);
+  deletedIds.forEach((taskId) => {
+    const previous = Number(deletions.tasks[taskId]?.deletedAt);
+    deletions.tasks[taskId] = {
+      deletedAt: Number.isFinite(previous) ? Math.max(previous, timestamp) : timestamp,
+    };
+  });
+  const revisionAt = Math.max(timestamp, ...[...deletedIds].map((taskId) => deletions.tasks[taskId].deletedAt));
+  state.deletions = deletions;
+  state.tasks = state.tasks.filter((task) => !deletedIds.has(String(task?.id)));
+  state.dailyPlans = removeDeletedTaskReferencesFromPlans(state.dailyPlans, deletedIds, timestamp, revisionAt);
+  if (dailyPlanReferencesAnyTask(dailyPlanPreview, deletedIds)) {
+    dailyPlanPreview = null;
+    dailyPlanPreviewError = null;
+    dailyPlanAdoptionError = null;
+    dailyPlanPreviewNeedsRegeneration = true;
+  }
+  saveState();
+  deletedTasks.forEach((task) => {
+    try {
+      const cancellation = cancelTaskNotification(task);
+      if (cancellation?.catch) cancellation.catch((error) => console.error("Task notification cancellation failed:", error));
+    } catch (error) {
+      console.error("Task notification cancellation failed:", error);
+    }
+  });
+  refreshAfterTaskDeletion();
+  return { ok: true, reason: null, deletedIds: [...deletedIds] };
+}
+
+function deleteTaskById(taskId, deletedAt) {
+  return deleteTasksByIds([taskId], deletedAt);
+}
+
+function clearDoneTasks() {
+  const doneTaskIds = state.tasks.filter((task) => task.done).map((task) => task.id);
+  if (!doneTaskIds.length) return { ok: false, reason: "no-completed-tasks", deletedIds: [] };
+  return deleteTasksByIds(doneTaskIds, Date.now());
 }
 
 function setDefaultTaskTimes() {
@@ -1630,6 +1822,15 @@ function renderTasks() {
 
     const content = document.createElement("div");
     content.className = "task-main";
+    content.tabIndex = 0;
+    content.setAttribute("role", "button");
+    content.setAttribute("aria-label", `查看任务 ${task.title}`);
+    content.addEventListener("click", () => showEventDetail({ ...task, type: "task" }));
+    content.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      showEventDetail({ ...task, type: "task" });
+    });
 
     const title = document.createElement("span");
     title.className = "task-title";
@@ -1696,10 +1897,12 @@ function renderTimeline() {
   const dayFocus = (state.focusSessions || [])
     .filter((session) => dateKey(new Date(session.startAt)) === selectedTimelineDate)
     .map((session) => ({ ...session, type: "focus", color: "lemon", done: true }));
+  const dayPlannedFocus = getAdoptedFocusBlocksForDay(selectedTimelineDate);
   const timelineItems = [
     ...dayTasks.map((task) => ({ ...task, type: "task" })),
     ...dayCourses,
     ...dayFocus,
+    ...dayPlannedFocus,
   ].sort((a, b) => a.startAt - b.startAt);
   const totalMinutes = timelineItems.reduce((sum, item) => sum + Math.max(1, Math.round((item.endAt - item.startAt) / 60000)), 0);
   const month = selectedDate.getMonth() + 1;
@@ -1720,7 +1923,10 @@ function renderTimeline() {
   for (const entry of timelineItems) {
     const color = getTaskColor(entry.color);
     const item = document.createElement("li");
-    item.className = `timeline-item is-${entry.type === "focus" || entry.type === "course" ? "done" : getTaskStatus(entry)}`;
+    const itemState = entry.type === "focus" || entry.type === "course"
+      ? "done"
+      : entry.type === "planned-focus" ? "planned" : getTaskStatus(entry);
+    item.className = `timeline-item is-${itemState}`;
     item.style.setProperty("--task-bg", color.bg);
     item.style.setProperty("--task-border", color.border);
     item.style.setProperty("--task-ink", color.ink);
@@ -1733,11 +1939,13 @@ function renderTimeline() {
     durationText.textContent = formatDuration(entry.startAt, entry.endAt);
     time.append(timeRange, durationText);
 
-    const card = document.createElement("div");
+    const card = document.createElement(entry.type === "planned-focus" ? "button" : "div");
     card.className = "timeline-task-card";
-    const icon = entry.type === "focus" ? "专" : entry.type === "course" ? "课" : entry.done ? "✓" : "◦";
+    const icon = entry.type === "focus" ? "专" : entry.type === "planned-focus" ? "计" : entry.type === "course" ? "课" : entry.done ? "✓" : "◦";
     const meta = entry.type === "focus"
       ? "完成一次专注"
+      : entry.type === "planned-focus"
+        ? `计划专注${entry.orphaned ? " · 原任务已删除" : ""}`
       : entry.type === "course"
         ? (entry.location || "课程安排")
         : entry.done ? "已完成" : "进行计划中";
@@ -1746,6 +1954,12 @@ function renderTimeline() {
     const cardMeta = document.createElement("span");
     cardMeta.textContent = meta;
     card.append(cardTitle, cardMeta);
+    if (entry.type === "planned-focus") {
+      card.type = "button";
+      card.classList.add("is-planned-focus");
+      card.setAttribute("aria-label", `计划专注 ${entry.title}，${formatClock(entry.startAt)} 到 ${formatClock(entry.endAt)}`);
+      card.addEventListener("click", () => showEventDetail(entry));
+    }
 
     item.append(time, card);
     els.timelineList.append(item);
@@ -1785,7 +1999,8 @@ function renderWeekSchedule() {
     const tasks = state.tasks
       .filter((task) => dateKey(new Date(task.startAt)) === key)
       .map((task) => ({ ...task, type: "task" }));
-    const items = [...courses, ...tasks].sort((a, b) => a.startAt - b.startAt);
+    const plannedFocus = getAdoptedFocusBlocksForDay(key);
+    const items = [...courses, ...tasks, ...plannedFocus].sort((a, b) => a.startAt - b.startAt);
     column.classList.toggle("is-empty", items.length === 0);
     column.classList.toggle("is-light", items.length === 1);
     column.classList.toggle("is-normal", items.length > 1 && items.length <= 3);
@@ -1800,8 +2015,13 @@ function renderWeekSchedule() {
       items.forEach((item) => {
         const itemStart = new Date(item.startAt);
         const itemEnd = new Date(item.endAt);
-        const startMinutes = itemStart.getHours() * 60 + itemStart.getMinutes();
-        const endMinutes = itemEnd.getHours() * 60 + itemEnd.getMinutes();
+        const dayBounds = item.type === "planned-focus" ? getDayBounds(key) : null;
+        const startMinutes = dayBounds
+          ? (item.startAt - dayBounds.startAt) / 60000
+          : itemStart.getHours() * 60 + itemStart.getMinutes();
+        const endMinutes = dayBounds
+          ? (item.endAt - dayBounds.startAt) / 60000
+          : itemEnd.getHours() * 60 + itemEnd.getMinutes();
         const visibleStart = Math.max(dayStartHour * 60, startMinutes);
         const visibleEnd = Math.min(dayEndHour * 60, Math.max(endMinutes, startMinutes + 30));
         const top = (visibleStart - dayStartHour * 60) / totalMinutes * 100;
@@ -1820,6 +2040,12 @@ function renderWeekSchedule() {
         const blockTitle = document.createElement("span");
         blockTitle.textContent = item.title;
         block.append(blockTime, blockTitle);
+        if (item.type === "planned-focus") {
+          const blockType = document.createElement("small");
+          blockType.textContent = item.orphaned ? "计划专注 · 原任务已删除" : "计划专注";
+          block.append(blockType);
+          block.setAttribute("aria-label", `计划专注 ${item.title}，${formatClock(item.startAt)} 到 ${formatClock(item.endAt)}`);
+        }
         block.addEventListener("click", () => showEventDetail(item));
         list.append(block);
       });
@@ -1832,7 +2058,9 @@ function renderWeekSchedule() {
 
 function showEventDetail(item) {
   const isCourse = item.type === "course";
-  els.eventSheetType.textContent = isCourse ? "Course" : "Task";
+  const isPlannedFocus = item.type === "planned-focus";
+  eventDetailTaskId = isCourse || isPlannedFocus ? null : String(item.id);
+  els.eventSheetType.textContent = isPlannedFocus ? "PLAN" : isCourse ? "Course" : "Task";
   els.eventSheetTitle.textContent = item.title;
   els.eventSheetMeta.textContent = "";
   const startText = document.createElement("span");
@@ -1844,16 +2072,34 @@ function showEventDetail(item) {
   els.eventSheetMeta.append(startText, endText, durationText);
   const details = [];
   if (isCourse && item.location) details.push(`地点：${item.location}`);
-  if (!isCourse) details.push(item.done ? "状态：已完成" : "状态：未完成");
+  if (isPlannedFocus) {
+    details.push("来源：今日编排");
+    if (item.orphaned) details.push("原任务已删除");
+  } else if (!isCourse) details.push(item.done ? "状态：已完成" : "状态：未完成");
   if (item.description) details.push(item.description);
   els.eventSheetDescription.textContent = details.join("\n") || "点开这里就能看完整安排。";
+  if (els.eventSheetDeleteButton) els.eventSheetDeleteButton.hidden = isCourse || isPlannedFocus;
   els.eventSheet.hidden = false;
   document.body.classList.add("has-event-sheet");
 }
 
 function hideEventDetail() {
+  eventDetailTaskId = null;
+  if (els.eventSheetDeleteButton) els.eventSheetDeleteButton.hidden = true;
   els.eventSheet.hidden = true;
   document.body.classList.remove("has-event-sheet");
+}
+
+function confirmDeleteEventTask() {
+  const task = state.tasks.find((item) => String(item.id) === eventDetailTaskId);
+  if (!task) return false;
+  const confirmed = window.confirm(`确定删除任务“${String(task.title || "未命名任务")}”吗？删除后会从任务、DDL 和今日编排中移除。`);
+  if (!confirmed) return false;
+  const result = deleteTaskById(task.id, Date.now());
+  if (!result.ok) return false;
+  hideEventDetail();
+  showReminderToast("任务已删除", "该任务已从任务、DDL 和今日编排中移除。");
+  return true;
 }
 
 function showCompletionSheet(minutes, earned) {
@@ -1901,6 +2147,15 @@ function renderDdl() {
     const remain = document.createElement("small");
     remain.textContent = remaining;
     content.append(title, end, remain);
+    content.tabIndex = 0;
+    content.setAttribute("role", "button");
+    content.setAttribute("aria-label", `查看任务 ${task.title}`);
+    content.addEventListener("click", () => showEventDetail({ ...task, type: "task" }));
+    content.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      showEventDetail({ ...task, type: "task" });
+    });
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
     checkbox.checked = task.done;
@@ -1939,10 +2194,49 @@ function updateMemo(id, title, tag, body) {
   renderFocusFeed();
 }
 
+function deleteMemoById(memoId, deletedAt) {
+  const id = memoId === undefined || memoId === null ? "" : String(memoId);
+  const timestamp = Number(deletedAt);
+  if (!id.trim() || ["__proto__", "prototype", "constructor"].includes(id)) {
+    return { ok: false, reason: "invalid-memo-id", deletedId: null };
+  }
+  if (!Number.isFinite(timestamp)) return { ok: false, reason: "invalid-deleted-at", deletedId: null };
+  const memo = (Array.isArray(state.memos) ? state.memos : []).find((item) => String(item?.id) === id);
+  if (!memo) return { ok: false, reason: "memo-not-found", deletedId: null };
+
+  const deletions = normalizeDeletionRegistry(state.deletions);
+  const previous = Number(deletions.memos[id]?.deletedAt);
+  deletions.memos[id] = {
+    deletedAt: Number.isFinite(previous) ? Math.max(previous, timestamp) : timestamp,
+  };
+  const previousDeletions = state.deletions;
+  const previousMemos = state.memos;
+  const previousSyncUpdatedAt = state.syncUpdatedAt;
+  state.deletions = deletions;
+  state.memos = filterDeletedEntities(state.memos, { [id]: deletions.memos[id] });
+  try {
+    const result = saveState();
+    if (result === false) throw new Error("saveState returned false");
+  } catch (error) {
+    console.error("Memo deletion failed:", error);
+    state.deletions = previousDeletions;
+    state.memos = previousMemos;
+    state.syncUpdatedAt = previousSyncUpdatedAt;
+    return { ok: false, reason: "save-failed", deletedId: null };
+  }
+  memoExportIds.delete(memo.id);
+  memoExportIds.delete(id);
+  renderMemos();
+  renderFocusFeed();
+  if (els.memoExportSheet && !els.memoExportSheet.hidden) renderMemoExportSheet();
+  return { ok: true, reason: null, deletedId: id };
+}
+
 function showMemoEditor(mode = "add") {
   els.memoEditorTitle.textContent = mode === "edit" ? "修改备忘" : "添加备忘";
   els.memoSubmitButton.textContent = mode === "edit" ? "保存修改" : "记下";
   els.memoCancelEditButton.hidden = mode !== "edit";
+  els.memoDeleteButton.hidden = mode !== "edit";
   els.memoEditorSheet.hidden = false;
   requestAnimationFrame(() => els.memoTitle.focus());
 }
@@ -1976,9 +2270,28 @@ function cancelEditMemo() {
   els.memoTitle.value = "";
   els.memoCustomTag.value = "";
   els.memoBody.value = "";
+  els.memoTag.value = state.selectedMemoTag !== "全部" && state.memoTags.includes(state.selectedMemoTag)
+    ? state.selectedMemoTag
+    : state.memoTags[0] || "其他";
   els.memoSubmitButton.textContent = "记下";
   els.memoCancelEditButton.hidden = true;
+  els.memoDeleteButton.hidden = true;
   hideMemoEditor();
+}
+
+function confirmDeleteEditingMemo() {
+  const memo = state.memos.find((item) => String(item.id) === String(editingMemoId || ""));
+  if (!memo) return false;
+  const confirmed = window.confirm(`确定删除备忘“${String(memo.title || "未命名备忘")}”吗？删除后将不再出现在备忘和专注轮播中。`);
+  if (!confirmed) return false;
+  const result = deleteMemoById(memo.id, Date.now());
+  if (!result.ok) {
+    showReminderToast("删除失败", "请稍后重试。");
+    return false;
+  }
+  cancelEditMemo();
+  showReminderToast("备忘已删除", "该备忘已从备忘和专注轮播中移除。");
+  return true;
 }
 
 function toggleMemo(id) {
@@ -3430,8 +3743,419 @@ function render() {
   renderFinance();
 }
 
+function cloneDailyPlanInputItem(item) {
+  return item && typeof item === "object" ? { ...item } : item;
+}
+
+function getDailyPlanPreviewInput(now) {
+  const timestamp = Number(now);
+  if (!Number.isFinite(timestamp)) throw new TypeError("今日编排需要有效的当前时间");
+  const current = new Date(timestamp);
+  const dayStart = new Date(current.getFullYear(), current.getMonth(), current.getDate()).getTime();
+  const nextDayStart = new Date(current.getFullYear(), current.getMonth(), current.getDate() + 1).getTime();
+  const recentStart = timestamp - 7 * 24 * 60 * 60 * 1000;
+  const tasks = (state.tasks || [])
+    .filter((task) => task && task.done !== true)
+    .map(cloneDailyPlanInputItem);
+  const courses = (state.courses || [])
+    .filter((course) => Number(course?.startAt) < nextDayStart && Number(course?.endAt) > dayStart)
+    .map(cloneDailyPlanInputItem);
+  const focusSessions = (state.focusSessions || [])
+    .filter((session) => Number(session?.endAt) >= recentStart && Number(session?.endAt) <= timestamp)
+    .map(cloneDailyPlanInputItem);
+  const fixedTaskIds = tasks
+    .filter((task) => globalThis.DailyPlanner.isFixedTimeTask(task))
+    .map((task) => String(task.id));
+  return { now: timestamp, tasks, courses, focusSessions, fixedTaskIds };
+}
+
+function dailyPlanClock(timestamp) {
+  const value = new Date(timestamp);
+  return `${String(value.getHours()).padStart(2, "0")}:${String(value.getMinutes()).padStart(2, "0")}`;
+}
+
+function dailyPlanDayKey(timestamp = Date.now()) {
+  const value = new Date(timestamp);
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function normalizeDailyPlanForDisplay(plan, expectedDayKey = null, requireAdopted = false) {
+  if (!plan || typeof plan !== "object" || Array.isArray(plan)) return null;
+  const dayKeyValue = typeof plan.dayKey === "string" ? plan.dayKey : "";
+  const generatedAt = Number(plan.generated_at);
+  const adoptedAt = Number(plan.adopted_at);
+  if (!dayKeyValue || (expectedDayKey && dayKeyValue !== expectedDayKey) || !Number.isFinite(generatedAt)) return null;
+  if (requireAdopted && !Number.isFinite(adoptedAt)) return null;
+  if (!plan.window || typeof plan.window !== "object" || Array.isArray(plan.window)) return null;
+  const focusTargetMinutes = Number(plan.focusTargetMinutes);
+  if (!Number.isFinite(focusTargetMinutes) || focusTargetMinutes <= 0) return null;
+  const priorities = Array.isArray(plan.priorities) ? plan.priorities
+    .filter((priority) => priority && typeof priority === "object")
+    .slice(0, 3)
+    .map((priority, index) => ({
+      rank: Number(priority.rank) || index + 1,
+      taskId: priority.taskId === null || priority.taskId === undefined ? null : String(priority.taskId),
+      title: String(priority.title || "未命名任务"),
+      startAt: Number.isFinite(Number(priority.startAt)) ? Number(priority.startAt) : null,
+      deadlineAt: Number.isFinite(Number(priority.deadlineAt)) ? Number(priority.deadlineAt) : null,
+      overdue: Boolean(priority.overdue),
+      reasons: Array.isArray(priority.reasons) ? priority.reasons.map(String) : [],
+    })) : [];
+  const blocks = Array.isArray(plan.blocks) ? plan.blocks
+    .filter((block) => block && typeof block === "object"
+      && Number.isFinite(Number(block.startAt))
+      && Number.isFinite(Number(block.endAt))
+      && Number(block.endAt) > Number(block.startAt))
+    .slice(0, 3)
+    .map((block) => ({
+      id: String(block.id || ""),
+      taskId: block.taskId === null || block.taskId === undefined ? null : String(block.taskId),
+      title: String(block.title || "专注时段"),
+      startAt: Number(block.startAt),
+      endAt: Number(block.endAt),
+      minutes: Math.max(0, Number(block.minutes) || 0),
+    })) : [];
+  const warnings = Array.isArray(plan.warnings) ? plan.warnings
+    .filter((warning) => warning && typeof warning === "object")
+    .map((warning) => ({
+      code: String(warning.code || "PLAN_WARNING"),
+      severity: String(warning.severity || "warning"),
+      message: String(warning.message || "需要检查当前安排"),
+      sourceIds: Array.isArray(warning.sourceIds) ? warning.sourceIds.map(String) : [],
+    })) : [];
+  return {
+    version: Number(plan.version) || 1,
+    dayKey: dayKeyValue,
+    generated_at: generatedAt,
+    ...(Number.isFinite(adoptedAt) ? { adopted_at: adoptedAt } : {}),
+    window: {
+      startAt: Number(plan.window.startAt),
+      endAt: Number(plan.window.endAt),
+      planningStartAt: Number(plan.window.planningStartAt),
+    },
+    focusTargetMinutes,
+    priorities,
+    blocks,
+    warnings,
+  };
+}
+
+function hasDailyPlanContent(plan) {
+  return Boolean(plan && (plan.priorities.length > 0 || plan.blocks.length > 0));
+}
+
+function getAdoptedDailyPlan(dayKeyValue) {
+  const saved = state.dailyPlans && typeof state.dailyPlans === "object" && !Array.isArray(state.dailyPlans)
+    ? state.dailyPlans[dayKeyValue]
+    : null;
+  const normalized = normalizeDailyPlanForDisplay(saved, dayKeyValue, true);
+  return normalized && (hasDailyPlanContent(normalized) || normalized.warnings.length > 0) ? normalized : null;
+}
+
+function getDayBounds(dayKeyValue) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dayKeyValue || ""))) return null;
+  const start = new Date(`${dayKeyValue}T00:00:00`);
+  if (!Number.isFinite(start.getTime()) || dailyPlanDayKey(start.getTime()) !== dayKeyValue) return null;
+  const end = new Date(start);
+  end.setDate(start.getDate() + 1);
+  return { startAt: start.getTime(), endAt: end.getTime() };
+}
+
+function getAdoptedFocusBlocksForDay(dayKeyValue) {
+  const bounds = getDayBounds(dayKeyValue);
+  if (!bounds) return [];
+  const previousDate = new Date(bounds.startAt);
+  previousDate.setDate(previousDate.getDate() - 1);
+  const candidatePlanKeys = [dayKeyValue, dailyPlanDayKey(previousDate.getTime())];
+  const activeTaskIds = new Set((Array.isArray(state.tasks) ? state.tasks : [])
+    .filter((task) => task?.id !== undefined && task?.id !== null)
+    .map((task) => String(task.id)));
+  const seenBlockIds = new Set();
+  const blocks = [];
+
+  candidatePlanKeys.forEach((planKey) => {
+    const plan = getAdoptedDailyPlan(planKey);
+    if (!plan) return;
+    const windowStartAt = Number(plan.window?.startAt);
+    const windowEndAt = Number(plan.window?.endAt);
+    const planningStartAt = Number(plan.window?.planningStartAt);
+    if (!Number.isFinite(windowStartAt) || !Number.isFinite(windowEndAt) || windowEndAt <= windowStartAt
+      || !Number.isFinite(planningStartAt)) return;
+    plan.blocks.forEach((block) => {
+      const id = String(block.id || "").trim();
+      const taskId = block.taskId === null || block.taskId === undefined ? "" : String(block.taskId);
+      if (!id || !taskId || seenBlockIds.has(id)) return;
+      if (!Number.isFinite(block.startAt) || !Number.isFinite(block.endAt) || block.endAt <= block.startAt) return;
+      if (!Number.isFinite(block.minutes) || block.minutes <= 0) return;
+      const startAt = Math.max(block.startAt, bounds.startAt);
+      const endAt = Math.min(block.endAt, bounds.endAt);
+      if (endAt <= startAt) return;
+      seenBlockIds.add(id);
+      blocks.push({
+        id,
+        taskId,
+        title: String(block.title || "计划专注"),
+        startAt,
+        endAt,
+        minutes: Math.max(1, Math.round((endAt - startAt) / 60000)),
+        originalStartAt: block.startAt,
+        originalEndAt: block.endAt,
+        planDayKey: plan.dayKey,
+        type: "planned-focus",
+        color: "lavender",
+        orphaned: !activeTaskIds.has(taskId),
+      });
+    });
+  });
+
+  return blocks.sort((a, b) => a.startAt - b.startAt || a.endAt - b.endAt || a.id.localeCompare(b.id));
+}
+
+function createAdoptedDailyPlan(preview, adoptedAt) {
+  const timestamp = Number(adoptedAt);
+  const normalized = normalizeDailyPlanForDisplay(preview, dailyPlanDayKey(timestamp), false);
+  if (!Number.isFinite(timestamp) || !hasDailyPlanContent(normalized)) return null;
+  const completePlan = {
+    ...normalized,
+    adopted_at: timestamp,
+  };
+  return typeof structuredClone === "function"
+    ? structuredClone(completePlan)
+    : JSON.parse(JSON.stringify(completePlan));
+}
+
+function appendDailyPlanEmpty(titleText, bodyText, className = "") {
+  const empty = document.createElement("div");
+  empty.className = `daily-plan-empty${className ? ` ${className}` : ""}`;
+  const title = document.createElement("strong");
+  const body = document.createElement("p");
+  title.textContent = titleText;
+  body.textContent = bodyText;
+  empty.append(title, body);
+  els.dailyPlanContent.append(empty);
+}
+
+function appendDailyPlanSummary(plan) {
+  const summary = document.createElement("div");
+  summary.className = "daily-plan-summary";
+  const title = document.createElement("h3");
+  const detail = document.createElement("p");
+  const generatedAt = new Date(plan.generated_at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+  title.textContent = plan.priorities.length > 0
+    ? `${plan.priorities.length} 个重点 · ${plan.blocks.length} 个建议时段`
+    : "今天还没有待编排任务";
+  detail.textContent = `建议单次专注 ${plan.focusTargetMinutes} 分钟 · 生成于 ${generatedAt}`;
+  summary.append(title, detail);
+  els.dailyPlanContent.append(summary);
+}
+
+function appendDailyPlanPriorities(priorities) {
+  if (priorities.length === 0) return;
+  const section = document.createElement("section");
+  section.className = "daily-plan-section";
+  const heading = document.createElement("h4");
+  heading.textContent = "今日重点";
+  const list = document.createElement("div");
+  list.className = "daily-plan-priorities";
+  priorities.slice(0, 3).forEach((priority) => {
+    const item = document.createElement("article");
+    item.className = "daily-plan-priority";
+    const copy = document.createElement("span");
+    const title = document.createElement("strong");
+    const reasons = document.createElement("small");
+    const deadline = document.createElement("b");
+    title.textContent = String(priority.title || "未命名任务");
+    reasons.textContent = (priority.reasons || []).map(String).join(" · ") || "等待安排";
+    deadline.textContent = priority.overdue
+      ? "已逾期"
+      : Number.isFinite(Number(priority.deadlineAt)) ? `${dailyPlanClock(priority.deadlineAt)} 截止` : "未设截止";
+    copy.append(title, reasons);
+    item.append(copy, deadline);
+    list.append(item);
+  });
+  section.append(heading, list);
+  els.dailyPlanContent.append(section);
+}
+
+function appendDailyPlanBlocks(blocks) {
+  if (blocks.length === 0) return;
+  const section = document.createElement("section");
+  section.className = "daily-plan-section";
+  const heading = document.createElement("h4");
+  heading.textContent = "建议专注时段";
+  const list = document.createElement("div");
+  list.className = "daily-plan-blocks";
+  blocks.slice(0, 3).forEach((block) => {
+    const item = document.createElement("article");
+    item.className = "daily-plan-block";
+    const time = document.createElement("span");
+    const title = document.createElement("strong");
+    const duration = document.createElement("small");
+    time.textContent = `${dailyPlanClock(block.startAt)}–${dailyPlanClock(block.endAt)}`;
+    title.textContent = String(block.title || "专注时段");
+    duration.textContent = `${Number(block.minutes) || 0} 分钟`;
+    item.append(time, title, duration);
+    list.append(item);
+  });
+  section.append(heading, list);
+  els.dailyPlanContent.append(section);
+}
+
+function appendDailyPlanWarnings(warnings) {
+  if (warnings.length === 0) return;
+  const section = document.createElement("section");
+  section.className = "daily-plan-section";
+  const heading = document.createElement("h4");
+  heading.textContent = `提醒（${warnings.length}）`;
+  const list = document.createElement("ul");
+  list.className = "daily-plan-warnings";
+  warnings.forEach((warning) => {
+    const item = document.createElement("li");
+    item.className = "daily-plan-warning";
+    const label = document.createElement("strong");
+    const message = document.createElement("span");
+    label.textContent = warning.severity === "error" ? "错误" : "提醒";
+    message.textContent = String(warning.message || "需要检查当前安排");
+    item.append(label, message);
+    list.append(item);
+  });
+  section.append(heading, list);
+  els.dailyPlanContent.append(section);
+}
+
+function renderDailyPlanPreview(now = Date.now()) {
+  if (!els.dailyPlanCard || !els.dailyPlanContent || !els.dailyPlanGenerateButton) return;
+  const todayKey = dailyPlanDayKey(now);
+  const preview = normalizeDailyPlanForDisplay(dailyPlanPreview, null, false);
+  const adoptedPlan = getAdoptedDailyPlan(todayKey);
+  const displayPlan = preview || adoptedPlan;
+  const hasValidPreview = hasDailyPlanContent(preview) && preview.dayKey === todayKey;
+  const isBusy = dailyPlanGenerating || dailyPlanAdopting;
+  els.dailyPlanCard.classList.toggle("is-loading", isBusy);
+  els.dailyPlanCard.classList.toggle("is-error", Boolean(dailyPlanPreviewError || dailyPlanAdoptionError));
+  els.dailyPlanCard.setAttribute("aria-busy", String(isBusy));
+  els.dailyPlanGenerateButton.disabled = isBusy;
+  els.dailyPlanGenerateButton.setAttribute("aria-disabled", String(isBusy));
+  els.dailyPlanGenerateButton.textContent = displayPlan ? "重新编排" : "为我编排今天";
+  if (els.dailyPlanAdoptButton) {
+    els.dailyPlanAdoptButton.hidden = !hasValidPreview;
+    els.dailyPlanAdoptButton.disabled = !hasValidPreview || isBusy || Boolean(dailyPlanPreviewError);
+    els.dailyPlanAdoptButton.setAttribute("aria-disabled", String(els.dailyPlanAdoptButton.disabled));
+    els.dailyPlanAdoptButton.textContent = dailyPlanAdopting ? "保存中…" : "采用到日程";
+  }
+  if (els.dailyPlanNextStage) {
+    const showReplacement = hasValidPreview && Boolean(adoptedPlan);
+    const showSaved = !preview && Boolean(adoptedPlan);
+    els.dailyPlanNextStage.hidden = !(showReplacement || showSaved);
+    els.dailyPlanNextStage.textContent = showReplacement
+      ? "采用后将替换今天已保存的编排"
+      : showSaved ? "今日编排已保存" : "";
+  }
+  els.dailyPlanContent.replaceChildren();
+
+  if (dailyPlanPreviewNeedsRegeneration) {
+    appendDailyPlanEmpty("需要重新编排", "原预览引用的任务已删除，请重新编排今天。", "daily-plan-warning-state");
+  }
+
+  if (dailyPlanAdoptionError) {
+    els.dailyPlanStatus.textContent = "保存失败";
+    appendDailyPlanEmpty("保存失败，请稍后重试", "当前预览仍保留在本机内存中。", "daily-plan-error");
+  } else if (dailyPlanPreviewError) {
+    els.dailyPlanStatus.textContent = "生成失败";
+    appendDailyPlanEmpty("暂时无法完成编排", "本地编排遇到问题，请稍后重新编排。", "daily-plan-error");
+  }
+  if (!displayPlan) {
+    if (dailyPlanAdoptionError || dailyPlanPreviewError) return;
+    if (dailyPlanPreviewNeedsRegeneration) {
+      els.dailyPlanStatus.textContent = "需要重新编排";
+      return;
+    }
+    if (!dailyPlanAdoptionError && !dailyPlanPreviewError) {
+      els.dailyPlanStatus.textContent = dailyPlanGenerating ? "编排中" : "尚未生成";
+    }
+    appendDailyPlanEmpty(
+      dailyPlanGenerating ? "正在整理今天的安排…" : "把散落的一天，轻轻排成可以完成的样子。",
+      dailyPlanGenerating ? "所有计算都在本机完成。" : "本地读取任务、课程、DDL 与近期专注节奏，生成三个重点和合适的专注时段。"
+    );
+    return;
+  }
+
+  if (!dailyPlanAdoptionError && !dailyPlanPreviewError) {
+    els.dailyPlanStatus.textContent = dailyPlanAdopting
+      ? "保存中"
+      : dailyPlanGenerating ? "重新编排中" : preview ? "预览已生成" : "已采用";
+  }
+  appendDailyPlanSummary(displayPlan);
+  appendDailyPlanPriorities(displayPlan.priorities.slice(0, 3));
+  appendDailyPlanBlocks(displayPlan.blocks.slice(0, 3));
+  if (displayPlan.priorities.length > 0 && displayPlan.blocks.length === 0) {
+    appendDailyPlanEmpty("暂时没有可用时段", "当前空闲段不足 20 分钟，可以先调整固定安排后重新编排。", "daily-plan-no-slots");
+  }
+  appendDailyPlanWarnings(displayPlan.warnings);
+}
+
+async function generateDailyPlanPreview(now) {
+  if (dailyPlanGenerating || dailyPlanAdopting) return false;
+  dailyPlanGenerating = true;
+  dailyPlanPreviewError = null;
+  dailyPlanAdoptionError = null;
+  dailyPlanPreviewNeedsRegeneration = false;
+  renderDailyPlanPreview(now);
+  try {
+    await Promise.resolve();
+    const planner = globalThis.DailyPlanner;
+    if (!planner || typeof planner.buildDailyPlan !== "function") throw new Error("本地编排引擎未加载");
+    const input = getDailyPlanPreviewInput(now);
+    dailyPlanPreview = planner.buildDailyPlan(input);
+    return true;
+  } catch (error) {
+    console.error("Daily plan preview failed:", error);
+    dailyPlanPreviewError = error instanceof Error ? error.message : "本地编排失败";
+    return false;
+  } finally {
+    dailyPlanGenerating = false;
+    renderDailyPlanPreview(now);
+  }
+}
+
+async function adoptDailyPlanPreview(adoptedAt) {
+  const timestamp = Number(adoptedAt);
+  const plan = createAdoptedDailyPlan(dailyPlanPreview, timestamp);
+  if (dailyPlanAdopting || dailyPlanGenerating || dailyPlanPreviewError || !plan) return false;
+  dailyPlanAdopting = true;
+  dailyPlanAdoptionError = null;
+  renderDailyPlanPreview(timestamp);
+  await Promise.resolve();
+  const dayKeyValue = plan.dayKey;
+  const plans = state.dailyPlans;
+  const hadPrevious = Object.prototype.hasOwnProperty.call(plans, dayKeyValue);
+  const previousPlan = plans[dayKeyValue];
+  const previousSyncUpdatedAt = state.syncUpdatedAt;
+  try {
+    state.dailyPlans[dayKeyValue] = plan;
+    const result = saveState();
+    if (result === false) throw new Error("saveState returned false");
+    dailyPlanPreview = null;
+    return true;
+  } catch (error) {
+    console.error("Daily plan adoption failed:", error);
+    if (hadPrevious) state.dailyPlans[dayKeyValue] = previousPlan;
+    else delete state.dailyPlans[dayKeyValue];
+    state.syncUpdatedAt = previousSyncUpdatedAt;
+    dailyPlanAdoptionError = "保存失败，请稍后重试";
+    return false;
+  } finally {
+    dailyPlanAdopting = false;
+    renderDailyPlanPreview(timestamp);
+  }
+}
+
 function renderHome() {
   if (!els.homeTodayMinutes) return;
+  renderDailyPlanPreview();
   const now = new Date();
   const todayKey = dateKey(now);
   const todayTasks = getTodayOpenTasks();
@@ -3710,6 +4434,8 @@ function setActiveView(viewName) {
 }
 
 els.startPauseButton.addEventListener("click", () => state.isRunning ? pauseTimer() : startTimer());
+els.dailyPlanGenerateButton.addEventListener("click", () => generateDailyPlanPreview(Date.now()));
+els.dailyPlanAdoptButton.addEventListener("click", () => adoptDailyPlanPreview(Date.now()));
 els.resetButton.addEventListener("click", resetTimer);
 els.fastFinishButton.addEventListener("click", fastFinishSession);
 els.plant.addEventListener("click", toggleFlower);
@@ -3814,6 +4540,7 @@ els.memoForm.addEventListener("submit", (event) => {
   hideMemoEditor();
 });
 els.memoCancelEditButton.addEventListener("click", cancelEditMemo);
+els.memoDeleteButton.addEventListener("click", confirmDeleteEditingMemo);
 els.memoAddOpenButton.addEventListener("click", openNewMemoEditor);
 els.memoEditorBackdrop.addEventListener("click", cancelEditMemo);
 els.memoEditorClose.addEventListener("click", cancelEditMemo);
@@ -3833,6 +4560,7 @@ els.memoExportJson.addEventListener("click", exportSelectedMemosJson);
 els.importIcsButton.addEventListener("click", () => els.icsFileInput.click());
 els.eventSheetBackdrop.addEventListener("click", hideEventDetail);
 els.eventSheetClose.addEventListener("click", hideEventDetail);
+els.eventSheetDeleteButton.addEventListener("click", confirmDeleteEventTask);
 els.skinPreviewBackdrop.addEventListener("click", hideSkinPreview);
 els.skinPreviewClose.addEventListener("click", hideSkinPreview);
 els.completeSheetBackdrop.addEventListener("click", hideCompletionSheet);
