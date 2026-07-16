@@ -6,6 +6,7 @@
   "scripts": {
     "start": "python -m http.server 5174 --bind 0.0.0.0",
     "test:planner": "node --test tests/daily-planner.test.cjs",
+    "test:planner-dom": "node --test tests/daily-planner-dom.test.cjs",
     "cap:add:android": "cap add android",
     "cap:copy": "cap copy android",
     "android:build": "cd android && gradlew.bat assembleDebug"

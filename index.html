@@ -7,7 +7,7 @@
     <title>自见</title>
     <link rel="manifest" href="./manifest.webmanifest?v=52" />
     <link rel="icon" href="./icon.svg?v=52" />
-    <link rel="stylesheet" href="./styles.css?v=52" />
+    <link rel="stylesheet" href="./styles.css?v=53" />
   </head>
   <body>
     <main class="app-shell">
@@ -34,20 +34,21 @@
             <article class="metric-card"><span>今日任务</span><strong id="homeTaskCount">0</strong><small>项待办</small></article>
             <article class="metric-card"><span>火苗</span><strong id="homeFlames">0</strong><small>可用</small></article>
           </div>
-          <article class="daily-plan-card" id="dailyPlanCard">
+          <article class="daily-plan-card" id="dailyPlanCard" aria-busy="false">
             <div class="daily-plan-head">
-              <div><p class="eyebrow">Daily compass</p><h2>今日编排</h2></div>
-              <span id="dailyPlanStatus">尚未生成</span>
+              <div><p class="eyebrow">本地智能编排</p><h2>今日编排</h2></div>
+              <span id="dailyPlanStatus" aria-live="polite">尚未生成</span>
             </div>
-            <div class="daily-plan-content" id="dailyPlanContent">
+            <div class="daily-plan-content" id="dailyPlanContent" aria-live="polite">
               <div class="daily-plan-empty">
                 <strong>把散落的一天，轻轻排成可以完成的样子。</strong>
-                <p>结合任务、课程、DDL、专注与近期节奏，生成三个重点和合适的专注时段。</p>
+                <p>本地读取任务、课程、DDL 与近期专注节奏，生成三个重点和合适的专注时段。</p>
               </div>
             </div>
             <div class="daily-plan-actions">
-              <button class="daily-plan-generate" id="dailyPlanGenerateButton" type="button">为我编排今天</button>
-              <button class="ghost-button" id="dailyPlanAdoptButton" type="button" hidden>采用到日程</button>
+              <button class="daily-plan-generate" id="dailyPlanGenerateButton" type="button" aria-controls="dailyPlanContent" aria-disabled="false">为我编排今天</button>
+              <span class="daily-plan-next-stage" id="dailyPlanNextStage" hidden>采用到日程将在下一阶段开放</span>
+              <button class="ghost-button" id="dailyPlanAdoptButton" type="button" disabled hidden aria-disabled="true">采用到日程</button>
             </div>
           </article>
           <article class="next-card">
@@ -607,6 +608,7 @@
 
     <script src="./capacitor.js"></script>
     <script src="./fflate.min.js?v=52"></script>
-    <script src="./app.js?v=52"></script>
+    <script src="./daily-planner.js?v=53"></script>
+    <script src="./app.js?v=53"></script>
   </body>
 </html>

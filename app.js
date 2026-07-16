@@ -112,6 +112,9 @@ let state = loadState();
 normalizeState();
 saveState(false);
 let tickHandle = null;
+let dailyPlanPreview = null;
+let dailyPlanPreviewError = null;
+let dailyPlanGenerating = false;
 
 const els = {
   scene: document.querySelector("#scene"),
@@ -255,6 +258,7 @@ const els = {
   dailyPlanContent: document.querySelector("#dailyPlanContent"),
   dailyPlanGenerateButton: document.querySelector("#dailyPlanGenerateButton"),
   dailyPlanAdoptButton: document.querySelector("#dailyPlanAdoptButton"),
+  dailyPlanNextStage: document.querySelector("#dailyPlanNextStage"),
   profileFlames: document.querySelector("#profileFlames"),
   usagePermissionCard: document.querySelector("#usagePermissionCard"),
   usagePermissionButton: document.querySelector("#usagePermissionButton"),
@@ -3442,8 +3446,197 @@ function render() {
   renderFinance();
 }
 
+function cloneDailyPlanInputItem(item) {
+  return item && typeof item === "object" ? { ...item } : item;
+}
+
+function getDailyPlanPreviewInput(now) {
+  const timestamp = Number(now);
+  if (!Number.isFinite(timestamp)) throw new TypeError("今日编排需要有效的当前时间");
+  const current = new Date(timestamp);
+  const dayStart = new Date(current.getFullYear(), current.getMonth(), current.getDate()).getTime();
+  const nextDayStart = new Date(current.getFullYear(), current.getMonth(), current.getDate() + 1).getTime();
+  const recentStart = timestamp - 7 * 24 * 60 * 60 * 1000;
+  const tasks = (state.tasks || [])
+    .filter((task) => task && task.done !== true)
+    .map(cloneDailyPlanInputItem);
+  const courses = (state.courses || [])
+    .filter((course) => Number(course?.startAt) < nextDayStart && Number(course?.endAt) > dayStart)
+    .map(cloneDailyPlanInputItem);
+  const focusSessions = (state.focusSessions || [])
+    .filter((session) => Number(session?.endAt) >= recentStart && Number(session?.endAt) <= timestamp)
+    .map(cloneDailyPlanInputItem);
+  const fixedTaskIds = tasks
+    .filter((task) => globalThis.DailyPlanner.isFixedTimeTask(task))
+    .map((task) => String(task.id));
+  return { now: timestamp, tasks, courses, focusSessions, fixedTaskIds };
+}
+
+function dailyPlanClock(timestamp) {
+  const value = new Date(timestamp);
+  return `${String(value.getHours()).padStart(2, "0")}:${String(value.getMinutes()).padStart(2, "0")}`;
+}
+
+function appendDailyPlanEmpty(titleText, bodyText, className = "") {
+  const empty = document.createElement("div");
+  empty.className = `daily-plan-empty${className ? ` ${className}` : ""}`;
+  const title = document.createElement("strong");
+  const body = document.createElement("p");
+  title.textContent = titleText;
+  body.textContent = bodyText;
+  empty.append(title, body);
+  els.dailyPlanContent.append(empty);
+}
+
+function appendDailyPlanSummary(plan) {
+  const summary = document.createElement("div");
+  summary.className = "daily-plan-summary";
+  const title = document.createElement("h3");
+  const detail = document.createElement("p");
+  const generatedAt = new Date(plan.generated_at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+  title.textContent = plan.priorities.length > 0
+    ? `${plan.priorities.length} 个重点 · ${plan.blocks.length} 个建议时段`
+    : "今天还没有待编排任务";
+  detail.textContent = `建议单次专注 ${plan.focusTargetMinutes} 分钟 · 生成于 ${generatedAt}`;
+  summary.append(title, detail);
+  els.dailyPlanContent.append(summary);
+}
+
+function appendDailyPlanPriorities(priorities) {
+  if (priorities.length === 0) return;
+  const section = document.createElement("section");
+  section.className = "daily-plan-section";
+  const heading = document.createElement("h4");
+  heading.textContent = "今日重点";
+  const list = document.createElement("div");
+  list.className = "daily-plan-priorities";
+  priorities.slice(0, 3).forEach((priority) => {
+    const item = document.createElement("article");
+    item.className = "daily-plan-priority";
+    const copy = document.createElement("span");
+    const title = document.createElement("strong");
+    const reasons = document.createElement("small");
+    const deadline = document.createElement("b");
+    title.textContent = String(priority.title || "未命名任务");
+    reasons.textContent = (priority.reasons || []).map(String).join(" · ") || "等待安排";
+    deadline.textContent = priority.overdue
+      ? "已逾期"
+      : Number.isFinite(Number(priority.deadlineAt)) ? `${dailyPlanClock(priority.deadlineAt)} 截止` : "未设截止";
+    copy.append(title, reasons);
+    item.append(copy, deadline);
+    list.append(item);
+  });
+  section.append(heading, list);
+  els.dailyPlanContent.append(section);
+}
+
+function appendDailyPlanBlocks(blocks) {
+  if (blocks.length === 0) return;
+  const section = document.createElement("section");
+  section.className = "daily-plan-section";
+  const heading = document.createElement("h4");
+  heading.textContent = "建议专注时段";
+  const list = document.createElement("div");
+  list.className = "daily-plan-blocks";
+  blocks.slice(0, 3).forEach((block) => {
+    const item = document.createElement("article");
+    item.className = "daily-plan-block";
+    const time = document.createElement("span");
+    const title = document.createElement("strong");
+    const duration = document.createElement("small");
+    time.textContent = `${dailyPlanClock(block.startAt)}–${dailyPlanClock(block.endAt)}`;
+    title.textContent = String(block.title || "专注时段");
+    duration.textContent = `${Number(block.minutes) || 0} 分钟`;
+    item.append(time, title, duration);
+    list.append(item);
+  });
+  section.append(heading, list);
+  els.dailyPlanContent.append(section);
+}
+
+function appendDailyPlanWarnings(warnings) {
+  if (warnings.length === 0) return;
+  const section = document.createElement("section");
+  section.className = "daily-plan-section";
+  const heading = document.createElement("h4");
+  heading.textContent = `提醒（${warnings.length}）`;
+  const list = document.createElement("ul");
+  list.className = "daily-plan-warnings";
+  warnings.forEach((warning) => {
+    const item = document.createElement("li");
+    item.className = "daily-plan-warning";
+    const label = document.createElement("strong");
+    const message = document.createElement("span");
+    label.textContent = warning.severity === "error" ? "错误" : "提醒";
+    message.textContent = String(warning.message || "需要检查当前安排");
+    item.append(label, message);
+    list.append(item);
+  });
+  section.append(heading, list);
+  els.dailyPlanContent.append(section);
+}
+
+function renderDailyPlanPreview() {
+  if (!els.dailyPlanCard || !els.dailyPlanContent || !els.dailyPlanGenerateButton) return;
+  els.dailyPlanCard.classList.toggle("is-loading", dailyPlanGenerating);
+  els.dailyPlanCard.classList.toggle("is-error", Boolean(dailyPlanPreviewError));
+  els.dailyPlanCard.setAttribute("aria-busy", String(dailyPlanGenerating));
+  els.dailyPlanGenerateButton.disabled = dailyPlanGenerating;
+  els.dailyPlanGenerateButton.setAttribute("aria-disabled", String(dailyPlanGenerating));
+  els.dailyPlanGenerateButton.textContent = dailyPlanPreview ? "重新编排" : "为我编排今天";
+  if (els.dailyPlanAdoptButton) els.dailyPlanAdoptButton.disabled = true;
+  if (els.dailyPlanNextStage) els.dailyPlanNextStage.hidden = !dailyPlanPreview || Boolean(dailyPlanPreviewError);
+  els.dailyPlanContent.replaceChildren();
+
+  if (dailyPlanPreviewError) {
+    els.dailyPlanStatus.textContent = "生成失败";
+    appendDailyPlanEmpty("暂时无法完成编排", "本地编排遇到问题，请稍后重新编排。", "daily-plan-error");
+    return;
+  }
+  if (!dailyPlanPreview) {
+    els.dailyPlanStatus.textContent = dailyPlanGenerating ? "编排中" : "尚未生成";
+    appendDailyPlanEmpty(
+      dailyPlanGenerating ? "正在整理今天的安排…" : "把散落的一天，轻轻排成可以完成的样子。",
+      dailyPlanGenerating ? "所有计算都在本机完成。" : "本地读取任务、课程、DDL 与近期专注节奏，生成三个重点和合适的专注时段。"
+    );
+    return;
+  }
+
+  els.dailyPlanStatus.textContent = dailyPlanGenerating ? "重新编排中" : "预览已生成";
+  appendDailyPlanSummary(dailyPlanPreview);
+  appendDailyPlanPriorities(dailyPlanPreview.priorities.slice(0, 3));
+  appendDailyPlanBlocks(dailyPlanPreview.blocks.slice(0, 3));
+  if (dailyPlanPreview.priorities.length > 0 && dailyPlanPreview.blocks.length === 0) {
+    appendDailyPlanEmpty("暂时没有可用时段", "当前空闲段不足 20 分钟，可以先调整固定安排后重新编排。", "daily-plan-no-slots");
+  }
+  appendDailyPlanWarnings(dailyPlanPreview.warnings);
+}
+
+async function generateDailyPlanPreview(now) {
+  if (dailyPlanGenerating) return false;
+  dailyPlanGenerating = true;
+  dailyPlanPreviewError = null;
+  renderDailyPlanPreview();
+  try {
+    await Promise.resolve();
+    const planner = globalThis.DailyPlanner;
+    if (!planner || typeof planner.buildDailyPlan !== "function") throw new Error("本地编排引擎未加载");
+    const input = getDailyPlanPreviewInput(now);
+    dailyPlanPreview = planner.buildDailyPlan(input);
+    return true;
+  } catch (error) {
+    console.error("Daily plan preview failed:", error);
+    dailyPlanPreviewError = error instanceof Error ? error.message : "本地编排失败";
+    return false;
+  } finally {
+    dailyPlanGenerating = false;
+    renderDailyPlanPreview();
+  }
+}
+
 function renderHome() {
   if (!els.homeTodayMinutes) return;
+  renderDailyPlanPreview();
   const now = new Date();
   const todayKey = dateKey(now);
   const todayTasks = getTodayOpenTasks();
@@ -3722,6 +3915,7 @@ function setActiveView(viewName) {
 }
 
 els.startPauseButton.addEventListener("click", () => state.isRunning ? pauseTimer() : startTimer());
+els.dailyPlanGenerateButton.addEventListener("click", () => generateDailyPlanPreview(Date.now()));
 els.resetButton.addEventListener("click", resetTimer);
 els.fastFinishButton.addEventListener("click", fastFinishSession);
 els.plant.addEventListener("click", toggleFlower);
