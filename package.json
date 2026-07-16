@@ -11,6 +11,7 @@
     "test:entity-deletion": "node --test tests/entity-deletion.test.cjs",
     "test:task-deletion": "node --test tests/task-deletion.test.cjs",
     "test:memo-deletion": "node --test tests/memo-deletion.test.cjs",
+    "test:planner-schedule": "node --test tests/planner-schedule.test.cjs",
     "cap:add:android": "cap add android",
     "cap:copy": "cap copy android",
     "android:build": "cd android && gradlew.bat assembleDebug"

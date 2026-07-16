@@ -1897,10 +1897,12 @@ function renderTimeline() {
   const dayFocus = (state.focusSessions || [])
     .filter((session) => dateKey(new Date(session.startAt)) === selectedTimelineDate)
     .map((session) => ({ ...session, type: "focus", color: "lemon", done: true }));
+  const dayPlannedFocus = getAdoptedFocusBlocksForDay(selectedTimelineDate);
   const timelineItems = [
     ...dayTasks.map((task) => ({ ...task, type: "task" })),
     ...dayCourses,
     ...dayFocus,
+    ...dayPlannedFocus,
   ].sort((a, b) => a.startAt - b.startAt);
   const totalMinutes = timelineItems.reduce((sum, item) => sum + Math.max(1, Math.round((item.endAt - item.startAt) / 60000)), 0);
   const month = selectedDate.getMonth() + 1;
@@ -1921,7 +1923,10 @@ function renderTimeline() {
   for (const entry of timelineItems) {
     const color = getTaskColor(entry.color);
     const item = document.createElement("li");
-    item.className = `timeline-item is-${entry.type === "focus" || entry.type === "course" ? "done" : getTaskStatus(entry)}`;
+    const itemState = entry.type === "focus" || entry.type === "course"
+      ? "done"
+      : entry.type === "planned-focus" ? "planned" : getTaskStatus(entry);
+    item.className = `timeline-item is-${itemState}`;
     item.style.setProperty("--task-bg", color.bg);
     item.style.setProperty("--task-border", color.border);
     item.style.setProperty("--task-ink", color.ink);
@@ -1934,11 +1939,13 @@ function renderTimeline() {
     durationText.textContent = formatDuration(entry.startAt, entry.endAt);
     time.append(timeRange, durationText);
 
-    const card = document.createElement("div");
+    const card = document.createElement(entry.type === "planned-focus" ? "button" : "div");
     card.className = "timeline-task-card";
-    const icon = entry.type === "focus" ? "专" : entry.type === "course" ? "课" : entry.done ? "✓" : "◦";
+    const icon = entry.type === "focus" ? "专" : entry.type === "planned-focus" ? "计" : entry.type === "course" ? "课" : entry.done ? "✓" : "◦";
     const meta = entry.type === "focus"
       ? "完成一次专注"
+      : entry.type === "planned-focus"
+        ? `计划专注${entry.orphaned ? " · 原任务已删除" : ""}`
       : entry.type === "course"
         ? (entry.location || "课程安排")
         : entry.done ? "已完成" : "进行计划中";
@@ -1947,6 +1954,12 @@ function renderTimeline() {
     const cardMeta = document.createElement("span");
     cardMeta.textContent = meta;
     card.append(cardTitle, cardMeta);
+    if (entry.type === "planned-focus") {
+      card.type = "button";
+      card.classList.add("is-planned-focus");
+      card.setAttribute("aria-label", `计划专注 ${entry.title}，${formatClock(entry.startAt)} 到 ${formatClock(entry.endAt)}`);
+      card.addEventListener("click", () => showEventDetail(entry));
+    }
 
     item.append(time, card);
     els.timelineList.append(item);
@@ -1986,7 +1999,8 @@ function renderWeekSchedule() {
     const tasks = state.tasks
       .filter((task) => dateKey(new Date(task.startAt)) === key)
       .map((task) => ({ ...task, type: "task" }));
-    const items = [...courses, ...tasks].sort((a, b) => a.startAt - b.startAt);
+    const plannedFocus = getAdoptedFocusBlocksForDay(key);
+    const items = [...courses, ...tasks, ...plannedFocus].sort((a, b) => a.startAt - b.startAt);
     column.classList.toggle("is-empty", items.length === 0);
     column.classList.toggle("is-light", items.length === 1);
     column.classList.toggle("is-normal", items.length > 1 && items.length <= 3);
@@ -2001,8 +2015,13 @@ function renderWeekSchedule() {
       items.forEach((item) => {
         const itemStart = new Date(item.startAt);
         const itemEnd = new Date(item.endAt);
-        const startMinutes = itemStart.getHours() * 60 + itemStart.getMinutes();
-        const endMinutes = itemEnd.getHours() * 60 + itemEnd.getMinutes();
+        const dayBounds = item.type === "planned-focus" ? getDayBounds(key) : null;
+        const startMinutes = dayBounds
+          ? (item.startAt - dayBounds.startAt) / 60000
+          : itemStart.getHours() * 60 + itemStart.getMinutes();
+        const endMinutes = dayBounds
+          ? (item.endAt - dayBounds.startAt) / 60000
+          : itemEnd.getHours() * 60 + itemEnd.getMinutes();
         const visibleStart = Math.max(dayStartHour * 60, startMinutes);
         const visibleEnd = Math.min(dayEndHour * 60, Math.max(endMinutes, startMinutes + 30));
         const top = (visibleStart - dayStartHour * 60) / totalMinutes * 100;
@@ -2021,6 +2040,12 @@ function renderWeekSchedule() {
         const blockTitle = document.createElement("span");
         blockTitle.textContent = item.title;
         block.append(blockTime, blockTitle);
+        if (item.type === "planned-focus") {
+          const blockType = document.createElement("small");
+          blockType.textContent = item.orphaned ? "计划专注 · 原任务已删除" : "计划专注";
+          block.append(blockType);
+          block.setAttribute("aria-label", `计划专注 ${item.title}，${formatClock(item.startAt)} 到 ${formatClock(item.endAt)}`);
+        }
         block.addEventListener("click", () => showEventDetail(item));
         list.append(block);
       });
@@ -2033,8 +2058,9 @@ function renderWeekSchedule() {
 
 function showEventDetail(item) {
   const isCourse = item.type === "course";
-  eventDetailTaskId = isCourse ? null : String(item.id);
-  els.eventSheetType.textContent = isCourse ? "Course" : "Task";
+  const isPlannedFocus = item.type === "planned-focus";
+  eventDetailTaskId = isCourse || isPlannedFocus ? null : String(item.id);
+  els.eventSheetType.textContent = isPlannedFocus ? "PLAN" : isCourse ? "Course" : "Task";
   els.eventSheetTitle.textContent = item.title;
   els.eventSheetMeta.textContent = "";
   const startText = document.createElement("span");
@@ -2046,10 +2072,13 @@ function showEventDetail(item) {
   els.eventSheetMeta.append(startText, endText, durationText);
   const details = [];
   if (isCourse && item.location) details.push(`地点：${item.location}`);
-  if (!isCourse) details.push(item.done ? "状态：已完成" : "状态：未完成");
+  if (isPlannedFocus) {
+    details.push("来源：今日编排");
+    if (item.orphaned) details.push("原任务已删除");
+  } else if (!isCourse) details.push(item.done ? "状态：已完成" : "状态：未完成");
   if (item.description) details.push(item.description);
   els.eventSheetDescription.textContent = details.join("\n") || "点开这里就能看完整安排。";
-  if (els.eventSheetDeleteButton) els.eventSheetDeleteButton.hidden = isCourse;
+  if (els.eventSheetDeleteButton) els.eventSheetDeleteButton.hidden = isCourse || isPlannedFocus;
   els.eventSheet.hidden = false;
   document.body.classList.add("has-event-sheet");
 }
@@ -3824,6 +3853,65 @@ function getAdoptedDailyPlan(dayKeyValue) {
     : null;
   const normalized = normalizeDailyPlanForDisplay(saved, dayKeyValue, true);
   return normalized && (hasDailyPlanContent(normalized) || normalized.warnings.length > 0) ? normalized : null;
+}
+
+function getDayBounds(dayKeyValue) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dayKeyValue || ""))) return null;
+  const start = new Date(`${dayKeyValue}T00:00:00`);
+  if (!Number.isFinite(start.getTime()) || dailyPlanDayKey(start.getTime()) !== dayKeyValue) return null;
+  const end = new Date(start);
+  end.setDate(start.getDate() + 1);
+  return { startAt: start.getTime(), endAt: end.getTime() };
+}
+
+function getAdoptedFocusBlocksForDay(dayKeyValue) {
+  const bounds = getDayBounds(dayKeyValue);
+  if (!bounds) return [];
+  const previousDate = new Date(bounds.startAt);
+  previousDate.setDate(previousDate.getDate() - 1);
+  const candidatePlanKeys = [dayKeyValue, dailyPlanDayKey(previousDate.getTime())];
+  const activeTaskIds = new Set((Array.isArray(state.tasks) ? state.tasks : [])
+    .filter((task) => task?.id !== undefined && task?.id !== null)
+    .map((task) => String(task.id)));
+  const seenBlockIds = new Set();
+  const blocks = [];
+
+  candidatePlanKeys.forEach((planKey) => {
+    const plan = getAdoptedDailyPlan(planKey);
+    if (!plan) return;
+    const windowStartAt = Number(plan.window?.startAt);
+    const windowEndAt = Number(plan.window?.endAt);
+    const planningStartAt = Number(plan.window?.planningStartAt);
+    if (!Number.isFinite(windowStartAt) || !Number.isFinite(windowEndAt) || windowEndAt <= windowStartAt
+      || !Number.isFinite(planningStartAt)) return;
+    plan.blocks.forEach((block) => {
+      const id = String(block.id || "").trim();
+      const taskId = block.taskId === null || block.taskId === undefined ? "" : String(block.taskId);
+      if (!id || !taskId || seenBlockIds.has(id)) return;
+      if (!Number.isFinite(block.startAt) || !Number.isFinite(block.endAt) || block.endAt <= block.startAt) return;
+      if (!Number.isFinite(block.minutes) || block.minutes <= 0) return;
+      const startAt = Math.max(block.startAt, bounds.startAt);
+      const endAt = Math.min(block.endAt, bounds.endAt);
+      if (endAt <= startAt) return;
+      seenBlockIds.add(id);
+      blocks.push({
+        id,
+        taskId,
+        title: String(block.title || "计划专注"),
+        startAt,
+        endAt,
+        minutes: Math.max(1, Math.round((endAt - startAt) / 60000)),
+        originalStartAt: block.startAt,
+        originalEndAt: block.endAt,
+        planDayKey: plan.dayKey,
+        type: "planned-focus",
+        color: "lavender",
+        orphaned: !activeTaskIds.has(taskId),
+      });
+    });
+  });
+
+  return blocks.sort((a, b) => a.startAt - b.startAt || a.endAt - b.endAt || a.id.localeCompare(b.id));
 }
 
 function createAdoptedDailyPlan(preview, adoptedAt) {

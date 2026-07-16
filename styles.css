@@ -1668,6 +1668,8 @@ body[data-skin="night"] .scene {
   min-height: 30px;
   height: var(--event-height, 10%);
   min-width: 0;
+  max-width: calc(100% - 12px);
+  overflow: hidden;
   padding: 6px;
   border: 2px solid var(--week-block-border, #9bc9e8);
   border-radius: 10px;
@@ -1697,6 +1699,18 @@ body[data-skin="night"] .scene {
 
 .week-block.is-task::before {
   background: var(--week-block-border, var(--primary));
+}
+
+.week-block.is-planned-focus {
+  border-style: dashed;
+  border-color: #8f79c9;
+  background: color-mix(in srgb, #8f79c9, var(--surface) 88%);
+  color: color-mix(in srgb, #4c376f, var(--ink) 30%);
+  box-shadow: inset 0 0 0 999px rgba(255, 255, 255, 0.05);
+}
+
+.week-block.is-planned-focus::before {
+  background: #8f79c9;
 }
 
 .week-block strong {
@@ -2106,6 +2120,25 @@ body[data-skin="night"] .scene {
 .timeline-task-card span {
   color: rgba(0, 0, 0, 0.48);
   font-weight: 800;
+}
+
+button.timeline-task-card {
+  width: 100%;
+  min-width: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.timeline-task-card.is-planned-focus {
+  border-style: dashed;
+  border-color: #8f79c9;
+  background: color-mix(in srgb, #8f79c9, var(--surface) 91%);
+}
+
+.timeline-task-card.is-planned-focus:focus-visible {
+  outline: 3px solid color-mix(in srgb, #8f79c9, transparent 55%);
+  outline-offset: 3px;
 }
 
 .timeline-empty {
