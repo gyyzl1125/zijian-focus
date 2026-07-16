@@ -5,6 +5,7 @@
   "description": "自见专注与日程安卓应用原型",
   "scripts": {
     "start": "python -m http.server 5174 --bind 0.0.0.0",
+    "test:planner": "node --test tests/daily-planner.test.cjs",
     "cap:add:android": "cap add android",
     "cap:copy": "cap copy android",
     "android:build": "cd android && gradlew.bat assembleDebug"
