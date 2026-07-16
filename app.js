@@ -118,6 +118,7 @@ let dailyPlanPreviewError = null;
 let dailyPlanGenerating = false;
 let dailyPlanAdopting = false;
 let dailyPlanAdoptionError = null;
+let dailyPlanPreviewNeedsRegeneration = false;
 
 const els = {
   scene: document.querySelector("#scene"),
@@ -239,6 +240,7 @@ const els = {
   eventSheetTitle: document.querySelector("#eventSheetTitle"),
   eventSheetMeta: document.querySelector("#eventSheetMeta"),
   eventSheetDescription: document.querySelector("#eventSheetDescription"),
+  eventSheetDeleteButton: document.querySelector("#eventSheetDeleteButton"),
   skinPreviewSheet: document.querySelector("#skinPreviewSheet"),
   skinPreviewBackdrop: document.querySelector("#skinPreviewBackdrop"),
   skinPreviewClose: document.querySelector("#skinPreviewClose"),
@@ -357,6 +359,7 @@ let financeSummaryMode = "expense";
 let pendingPaymentActive = false;
 let selectedFinanceCategory = null;
 let financeRingSegments = [];
+let eventDetailTaskId = null;
 let syncSession = loadSyncSession();
 let syncUploadTimer = null;
 let syncInFlight = false;
@@ -1210,17 +1213,115 @@ function toggleTask(id) {
   checkReminders();
 }
 
-function clearDoneTasks() {
-  state.tasks.filter((task) => task.done).forEach((task) => cancelTaskNotification(task).catch(() => {}));
-  state.tasks = state.tasks.filter((task) => !task.done);
-  saveState();
+function dailyPlanReferencesAnyTask(plan, taskIds) {
+  if (!plan || typeof plan !== "object" || Array.isArray(plan)) return false;
+  const references = [
+    ...(Array.isArray(plan.priorities) ? plan.priorities : []),
+    ...(Array.isArray(plan.blocks) ? plan.blocks : []),
+  ];
+  return references.some((item) => item?.taskId !== undefined && item?.taskId !== null && taskIds.has(String(item.taskId)));
+}
+
+function removeDeletedTaskReferencesFromPlans(plans, taskIds, deletedAt, revisedAt = deletedAt) {
+  const source = plans && typeof plans === "object" && !Array.isArray(plans) ? plans : {};
+  const todayKey = dailyPlanDayKey(deletedAt);
+  const nextPlans = { ...source };
+  Object.entries(source).forEach(([dayKeyValue, plan]) => {
+    if (dayKeyValue < todayKey || !dailyPlanReferencesAnyTask(plan, taskIds)) return;
+    const priorities = Array.isArray(plan.priorities) ? plan.priorities : [];
+    const blocks = Array.isArray(plan.blocks) ? plan.blocks : [];
+    const affectedIds = new Set();
+    [...priorities, ...blocks].forEach((item) => {
+      const id = item?.taskId === undefined || item?.taskId === null ? "" : String(item.taskId);
+      if (taskIds.has(id)) affectedIds.add(id);
+    });
+    const warnings = Array.isArray(plan.warnings) ? [...plan.warnings] : [];
+    affectedIds.forEach((taskId) => {
+      const exists = warnings.some((warning) => warning?.code === "TASK_DELETED"
+        && Array.isArray(warning.sourceIds)
+        && warning.sourceIds.some((sourceId) => String(sourceId) === taskId));
+      if (!exists) {
+        warnings.push({
+          code: "TASK_DELETED",
+          severity: "warning",
+          message: "原重点任务已删除，相关专注时段已移除",
+          sourceIds: [taskId],
+        });
+      }
+    });
+    nextPlans[dayKeyValue] = {
+      ...plan,
+      adopted_at: Math.max(Number.isFinite(Number(plan.adopted_at)) ? Number(plan.adopted_at) : 0, revisedAt),
+      priorities: priorities.filter((item) => !taskIds.has(String(item?.taskId))),
+      blocks: blocks.filter((item) => !taskIds.has(String(item?.taskId))),
+      warnings,
+    };
+  });
+  return nextPlans;
+}
+
+function refreshAfterTaskDeletion() {
   renderTasks();
   renderTimeline();
   renderWeekSchedule();
   renderDdl();
   renderWidgets();
   renderFocusFeed();
+  renderHome();
+  renderNotificationButton();
   updatePageBadge();
+}
+
+function deleteTasksByIds(taskIds, deletedAt) {
+  const timestamp = Number(deletedAt);
+  const requestedIds = new Set((Array.isArray(taskIds) ? taskIds : [taskIds])
+    .map((id) => id === undefined || id === null ? "" : String(id))
+    .filter((id) => id.trim() && !["__proto__", "prototype", "constructor"].includes(id)));
+  if (!requestedIds.size) return { ok: false, reason: "invalid-task-id", deletedIds: [] };
+  if (!Number.isFinite(timestamp)) return { ok: false, reason: "invalid-deleted-at", deletedIds: [] };
+  const deletedTasks = (Array.isArray(state.tasks) ? state.tasks : [])
+    .filter((task) => requestedIds.has(String(task?.id)));
+  if (!deletedTasks.length) return { ok: false, reason: "task-not-found", deletedIds: [] };
+
+  const deletedIds = new Set(deletedTasks.map((task) => String(task.id)));
+  const deletions = normalizeDeletionRegistry(state.deletions);
+  deletedIds.forEach((taskId) => {
+    const previous = Number(deletions.tasks[taskId]?.deletedAt);
+    deletions.tasks[taskId] = {
+      deletedAt: Number.isFinite(previous) ? Math.max(previous, timestamp) : timestamp,
+    };
+  });
+  const revisionAt = Math.max(timestamp, ...[...deletedIds].map((taskId) => deletions.tasks[taskId].deletedAt));
+  state.deletions = deletions;
+  state.tasks = state.tasks.filter((task) => !deletedIds.has(String(task?.id)));
+  state.dailyPlans = removeDeletedTaskReferencesFromPlans(state.dailyPlans, deletedIds, timestamp, revisionAt);
+  if (dailyPlanReferencesAnyTask(dailyPlanPreview, deletedIds)) {
+    dailyPlanPreview = null;
+    dailyPlanPreviewError = null;
+    dailyPlanAdoptionError = null;
+    dailyPlanPreviewNeedsRegeneration = true;
+  }
+  saveState();
+  deletedTasks.forEach((task) => {
+    try {
+      const cancellation = cancelTaskNotification(task);
+      if (cancellation?.catch) cancellation.catch((error) => console.error("Task notification cancellation failed:", error));
+    } catch (error) {
+      console.error("Task notification cancellation failed:", error);
+    }
+  });
+  refreshAfterTaskDeletion();
+  return { ok: true, reason: null, deletedIds: [...deletedIds] };
+}
+
+function deleteTaskById(taskId, deletedAt) {
+  return deleteTasksByIds([taskId], deletedAt);
+}
+
+function clearDoneTasks() {
+  const doneTaskIds = state.tasks.filter((task) => task.done).map((task) => task.id);
+  if (!doneTaskIds.length) return { ok: false, reason: "no-completed-tasks", deletedIds: [] };
+  return deleteTasksByIds(doneTaskIds, Date.now());
 }
 
 function setDefaultTaskTimes() {
@@ -1720,6 +1821,15 @@ function renderTasks() {
 
     const content = document.createElement("div");
     content.className = "task-main";
+    content.tabIndex = 0;
+    content.setAttribute("role", "button");
+    content.setAttribute("aria-label", `查看任务 ${task.title}`);
+    content.addEventListener("click", () => showEventDetail({ ...task, type: "task" }));
+    content.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      showEventDetail({ ...task, type: "task" });
+    });
 
     const title = document.createElement("span");
     title.className = "task-title";
@@ -1922,6 +2032,7 @@ function renderWeekSchedule() {
 
 function showEventDetail(item) {
   const isCourse = item.type === "course";
+  eventDetailTaskId = isCourse ? null : String(item.id);
   els.eventSheetType.textContent = isCourse ? "Course" : "Task";
   els.eventSheetTitle.textContent = item.title;
   els.eventSheetMeta.textContent = "";
@@ -1937,13 +2048,28 @@ function showEventDetail(item) {
   if (!isCourse) details.push(item.done ? "状态：已完成" : "状态：未完成");
   if (item.description) details.push(item.description);
   els.eventSheetDescription.textContent = details.join("\n") || "点开这里就能看完整安排。";
+  if (els.eventSheetDeleteButton) els.eventSheetDeleteButton.hidden = isCourse;
   els.eventSheet.hidden = false;
   document.body.classList.add("has-event-sheet");
 }
 
 function hideEventDetail() {
+  eventDetailTaskId = null;
+  if (els.eventSheetDeleteButton) els.eventSheetDeleteButton.hidden = true;
   els.eventSheet.hidden = true;
   document.body.classList.remove("has-event-sheet");
+}
+
+function confirmDeleteEventTask() {
+  const task = state.tasks.find((item) => String(item.id) === eventDetailTaskId);
+  if (!task) return false;
+  const confirmed = window.confirm(`确定删除任务“${String(task.title || "未命名任务")}”吗？删除后会从任务、DDL 和今日编排中移除。`);
+  if (!confirmed) return false;
+  const result = deleteTaskById(task.id, Date.now());
+  if (!result.ok) return false;
+  hideEventDetail();
+  showReminderToast("任务已删除", "该任务已从任务、DDL 和今日编排中移除。");
+  return true;
 }
 
 function showCompletionSheet(minutes, earned) {
@@ -1991,6 +2117,15 @@ function renderDdl() {
     const remain = document.createElement("small");
     remain.textContent = remaining;
     content.append(title, end, remain);
+    content.tabIndex = 0;
+    content.setAttribute("role", "button");
+    content.setAttribute("aria-label", `查看任务 ${task.title}`);
+    content.addEventListener("click", () => showEventDetail({ ...task, type: "task" }));
+    content.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      showEventDetail({ ...task, type: "task" });
+    });
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
     checkbox.checked = task.done;
@@ -3629,7 +3764,7 @@ function getAdoptedDailyPlan(dayKeyValue) {
     ? state.dailyPlans[dayKeyValue]
     : null;
   const normalized = normalizeDailyPlanForDisplay(saved, dayKeyValue, true);
-  return hasDailyPlanContent(normalized) ? normalized : null;
+  return normalized && (hasDailyPlanContent(normalized) || normalized.warnings.length > 0) ? normalized : null;
 }
 
 function createAdoptedDailyPlan(preview, adoptedAt) {
@@ -3774,6 +3909,10 @@ function renderDailyPlanPreview(now = Date.now()) {
   }
   els.dailyPlanContent.replaceChildren();
 
+  if (dailyPlanPreviewNeedsRegeneration) {
+    appendDailyPlanEmpty("需要重新编排", "原预览引用的任务已删除，请重新编排今天。", "daily-plan-warning-state");
+  }
+
   if (dailyPlanAdoptionError) {
     els.dailyPlanStatus.textContent = "保存失败";
     appendDailyPlanEmpty("保存失败，请稍后重试", "当前预览仍保留在本机内存中。", "daily-plan-error");
@@ -3783,6 +3922,10 @@ function renderDailyPlanPreview(now = Date.now()) {
   }
   if (!displayPlan) {
     if (dailyPlanAdoptionError || dailyPlanPreviewError) return;
+    if (dailyPlanPreviewNeedsRegeneration) {
+      els.dailyPlanStatus.textContent = "需要重新编排";
+      return;
+    }
     if (!dailyPlanAdoptionError && !dailyPlanPreviewError) {
       els.dailyPlanStatus.textContent = dailyPlanGenerating ? "编排中" : "尚未生成";
     }
@@ -3812,6 +3955,7 @@ async function generateDailyPlanPreview(now) {
   dailyPlanGenerating = true;
   dailyPlanPreviewError = null;
   dailyPlanAdoptionError = null;
+  dailyPlanPreviewNeedsRegeneration = false;
   renderDailyPlanPreview(now);
   try {
     await Promise.resolve();
@@ -4268,6 +4412,7 @@ els.memoExportJson.addEventListener("click", exportSelectedMemosJson);
 els.importIcsButton.addEventListener("click", () => els.icsFileInput.click());
 els.eventSheetBackdrop.addEventListener("click", hideEventDetail);
 els.eventSheetClose.addEventListener("click", hideEventDetail);
+els.eventSheetDeleteButton.addEventListener("click", confirmDeleteEventTask);
 els.skinPreviewBackdrop.addEventListener("click", hideSkinPreview);
 els.skinPreviewClose.addEventListener("click", hideSkinPreview);
 els.completeSheetBackdrop.addEventListener("click", hideCompletionSheet);

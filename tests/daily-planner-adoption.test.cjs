@@ -78,6 +78,7 @@ function createHarness({ state = baseState(), saveMode = "success", planner = Da
     let dailyPlanGenerating = false;
     let dailyPlanAdopting = false;
     let dailyPlanAdoptionError = null;
+    let dailyPlanPreviewNeedsRegeneration = false;
     ${persistenceSource}
     this.adoptionApi = {
       render: renderDailyPlanPreview,

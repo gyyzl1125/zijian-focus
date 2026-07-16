@@ -9,6 +9,7 @@
     "test:planner-dom": "node --test tests/daily-planner-dom.test.cjs",
     "test:planner-adoption": "node --test tests/daily-planner-adoption.test.cjs",
     "test:entity-deletion": "node --test tests/entity-deletion.test.cjs",
+    "test:task-deletion": "node --test tests/task-deletion.test.cjs",
     "cap:add:android": "cap add android",
     "cap:copy": "cap copy android",
     "android:build": "cd android && gradlew.bat assembleDebug"

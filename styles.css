@@ -1772,6 +1772,11 @@ body[data-skin="night"] .scene {
   min-width: 0;
 }
 
+.ddl-item div[role="button"] {
+  cursor: pointer;
+  border-radius: 8px;
+}
+
 .ddl-item strong {
   overflow-wrap: anywhere;
   font-size: 1.05rem;
@@ -2545,6 +2550,14 @@ body[data-skin="night"] .scene {
   display: grid;
   gap: 4px;
   min-width: 0;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.task-main:focus-visible,
+.ddl-item div[role="button"]:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--primary) 45%, transparent);
+  outline-offset: 3px;
 }
 
 .task-title {
@@ -2704,12 +2717,32 @@ body[data-skin="night"] .scene {
   color: var(--ink);
 }
 
-.event-sheet-card p:last-child {
+.event-sheet-card #eventSheetDescription {
   margin: 0;
   color: var(--muted);
   font-weight: 800;
   line-height: 1.55;
   white-space: pre-wrap;
+}
+
+.event-sheet-delete-button {
+  width: 100%;
+  min-height: 46px;
+  border: 1px solid #c23b3b;
+  border-radius: 14px;
+  background: #fff1f1;
+  color: #9d2424;
+  font: inherit;
+  font-weight: 900;
+}
+
+.event-sheet-delete-button:hover {
+  background: #ffe5e5;
+}
+
+.event-sheet-delete-button:focus-visible {
+  outline: 3px solid rgba(194, 59, 59, 0.28);
+  outline-offset: 3px;
 }
 
 .memo-export-sheet[hidden] {

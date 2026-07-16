@@ -70,6 +70,7 @@ function createHarness({ state, planner = DailyPlanner } = {}) {
     let dailyPlanGenerating = false;
     let dailyPlanAdopting = false;
     let dailyPlanAdoptionError = null;
+    let dailyPlanPreviewNeedsRegeneration = false;
     ${previewSource}
     this.previewApi = {
       getInput: getDailyPlanPreviewInput,
