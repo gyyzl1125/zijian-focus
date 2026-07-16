@@ -285,11 +285,14 @@ test("persisted JSON contains no preview, loading, DOM or error fields", async (
 });
 
 test("dailyPlans sync recency uses adopted_at before generated_at", () => {
+  const deletionStart = appSource.indexOf("function normalizeDeletionMap");
+  const deletionEnd = appSource.indexOf("function normalizeState", deletionStart);
   const mergeStart = appSource.indexOf("function mergeById");
   const mergeEnd = appSource.indexOf("function cloudSafeState", mergeStart);
+  assert.ok(deletionStart >= 0 && deletionEnd > deletionStart);
   const context = { Number, Map, Set };
   vm.createContext(context);
-  vm.runInContext(`${appSource.slice(mergeStart, mergeEnd)}\nthis.merge = mergeSyncedStates;`, context);
+  vm.runInContext(`${appSource.slice(deletionStart, deletionEnd)}\n${appSource.slice(mergeStart, mergeEnd)}\nthis.merge = mergeSyncedStates;`, context);
   const localPlan = { generated_at: 100, adopted_at: 150, marker: "local-old" };
   const remotePlan = { generated_at: 100, adopted_at: 200, marker: "remote-new" };
   const base = { dailyPlans: {}, focusByDate: {}, memoTags: [], ownedSkins: [], ownedFlowers: [], ownedThemes: [], quotes: [] };

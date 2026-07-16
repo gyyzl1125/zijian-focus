@@ -106,6 +106,7 @@ const defaultState = {
   transactions: [],
   monthlyBudget: 0,
   dailyPlans: {},
+  deletions: { version: 1, tasks: {}, memos: {} },
 };
 
 let state = loadState();
@@ -389,7 +390,60 @@ function loadState() {
   return { ...defaultState };
 }
 
+function normalizeDeletionMap(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const normalized = {};
+  Object.entries(value).forEach(([rawId, record]) => {
+    const id = String(rawId);
+    if (!id.trim() || ["__proto__", "prototype", "constructor"].includes(id)) return;
+    if (!record || typeof record !== "object" || Array.isArray(record)) return;
+    const deletedAt = record.deletedAt;
+    if (typeof deletedAt !== "number" || !Number.isFinite(deletedAt)) return;
+    normalized[id] = { deletedAt };
+  });
+  return normalized;
+}
+
+function normalizeDeletionRegistry(value) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return {
+    version: 1,
+    tasks: normalizeDeletionMap(source.tasks),
+    memos: normalizeDeletionMap(source.memos),
+  };
+}
+
+function mergeDeletionMaps(localValue, remoteValue) {
+  const local = normalizeDeletionMap(localValue);
+  const remote = normalizeDeletionMap(remoteValue);
+  const merged = { ...local };
+  Object.entries(remote).forEach(([id, record]) => {
+    if (!merged[id] || record.deletedAt > merged[id].deletedAt) merged[id] = { deletedAt: record.deletedAt };
+  });
+  return merged;
+}
+
+function mergeDeletionRegistries(localValue, remoteValue) {
+  const local = normalizeDeletionRegistry(localValue);
+  const remote = normalizeDeletionRegistry(remoteValue);
+  return {
+    version: 1,
+    tasks: mergeDeletionMaps(local.tasks, remote.tasks),
+    memos: mergeDeletionMaps(local.memos, remote.memos),
+  };
+}
+
+function filterDeletedEntities(items, deletionMap) {
+  const activeDeletions = normalizeDeletionMap(deletionMap);
+  return (Array.isArray(items) ? items : []).filter((item) => {
+    if (!item || item.id === undefined || item.id === null) return true;
+    return !Object.prototype.hasOwnProperty.call(activeDeletions, String(item.id));
+  });
+}
+
 function normalizeState() {
+  state.deletions = normalizeDeletionRegistry(state.deletions);
+  state.tasks = filterDeletedEntities(state.tasks, state.deletions.tasks);
   state.flames = Number(state.flames || 0);
   state.flameLedger = Array.isArray(state.flameLedger) ? state.flameLedger : [];
   state.courses = Array.isArray(state.courses) ? state.courses : [];
@@ -399,6 +453,7 @@ function normalizeState() {
     tag: memo.tag === "片子" ? "影视音乐" : memo.tag,
     body: memo.body || "",
   }));
+  state.memos = filterDeletedEntities(state.memos, state.deletions.memos);
   const savedTags = Array.isArray(state.memoTags) ? state.memoTags.map((tag) => tag === "片子" ? "影视音乐" : tag) : [];
   state.memoTags = [...new Set([...DEFAULT_MEMO_TAGS.slice(1), ...savedTags, ...state.memos.map((memo) => memo.tag)])].filter(Boolean);
   if (state.selectedMemoTag === "片子") state.selectedMemoTag = "影视音乐";
@@ -583,9 +638,18 @@ function mergeSyncedStates(local, remote) {
   const preferRemote = Number(remote?.syncUpdatedAt || 0) > Number(local?.syncUpdatedAt || 0);
   const preferred = preferRemote ? remote : local;
   const merged = { ...local, ...preferred };
-  ["tasks", "courses", "memos", "focusSessions", "flameLedger", "transactions"].forEach((key) => {
+  merged.deletions = mergeDeletionRegistries(local?.deletions, remote?.deletions);
+  ["courses", "focusSessions", "flameLedger", "transactions"].forEach((key) => {
     merged[key] = mergeById(local?.[key], remote?.[key], preferRemote);
   });
+  merged.tasks = filterDeletedEntities(
+    mergeById(local?.tasks, remote?.tasks, preferRemote),
+    merged.deletions.tasks
+  );
+  merged.memos = filterDeletedEntities(
+    mergeById(local?.memos, remote?.memos, preferRemote),
+    merged.deletions.memos
+  );
   merged.memoTags = [...new Set([...(local.memoTags || []), ...(remote.memoTags || [])])];
   merged.ownedSkins = [...new Set([...(local.ownedSkins || []), ...(remote.ownedSkins || [])])];
   merged.ownedFlowers = [...new Set([...(local.ownedFlowers || []), ...(remote.ownedFlowers || [])])];
@@ -606,6 +670,9 @@ function mergeSyncedStates(local, remote) {
 
 function cloudSafeState() {
   const snapshot = structuredClone(state);
+  snapshot.deletions = normalizeDeletionRegistry(snapshot.deletions);
+  snapshot.tasks = filterDeletedEntities(snapshot.tasks, snapshot.deletions.tasks);
+  snapshot.memos = filterDeletedEntities(snapshot.memos, snapshot.deletions.memos);
   snapshot.heatmapImage = "";
   snapshot.isRunning = false;
   snapshot.startedAt = null;
