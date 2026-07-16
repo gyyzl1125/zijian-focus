@@ -115,6 +115,8 @@ let tickHandle = null;
 let dailyPlanPreview = null;
 let dailyPlanPreviewError = null;
 let dailyPlanGenerating = false;
+let dailyPlanAdopting = false;
+let dailyPlanAdoptionError = null;
 
 const els = {
   scene: document.querySelector("#scene"),
@@ -572,6 +574,11 @@ function mergeById(localItems = [], remoteItems = [], preferRemote = false) {
   return [...merged.values()];
 }
 
+function dailyPlanRevision(plan) {
+  const adoptedAt = Number(plan?.adopted_at);
+  return Number.isFinite(adoptedAt) && adoptedAt > 0 ? adoptedAt : Number(plan?.generated_at || 0);
+}
+
 function mergeSyncedStates(local, remote) {
   const preferRemote = Number(remote?.syncUpdatedAt || 0) > Number(local?.syncUpdatedAt || 0);
   const preferred = preferRemote ? remote : local;
@@ -589,7 +596,7 @@ function mergeSyncedStates(local, remote) {
   merged.dailyPlans = { ...(local.dailyPlans || {}), ...(remote.dailyPlans || {}) };
   Object.entries(local.dailyPlans || {}).forEach(([day, plan]) => {
     const remotePlan = remote.dailyPlans?.[day];
-    if (!remotePlan || Number(plan?.generated_at || 0) >= Number(remotePlan?.generated_at || 0)) merged.dailyPlans[day] = plan;
+    if (!remotePlan || dailyPlanRevision(plan) >= dailyPlanRevision(remotePlan)) merged.dailyPlans[day] = plan;
   });
   merged.heatmapImage = local.heatmapImage || "";
   ["isRunning", "startedAt", "endsAt", "timerSecondsLeft", "timerTotalSeconds"].forEach((key) => { merged[key] = local[key]; });
@@ -3477,6 +3484,100 @@ function dailyPlanClock(timestamp) {
   return `${String(value.getHours()).padStart(2, "0")}:${String(value.getMinutes()).padStart(2, "0")}`;
 }
 
+function dailyPlanDayKey(timestamp = Date.now()) {
+  const value = new Date(timestamp);
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function normalizeDailyPlanForDisplay(plan, expectedDayKey = null, requireAdopted = false) {
+  if (!plan || typeof plan !== "object" || Array.isArray(plan)) return null;
+  const dayKeyValue = typeof plan.dayKey === "string" ? plan.dayKey : "";
+  const generatedAt = Number(plan.generated_at);
+  const adoptedAt = Number(plan.adopted_at);
+  if (!dayKeyValue || (expectedDayKey && dayKeyValue !== expectedDayKey) || !Number.isFinite(generatedAt)) return null;
+  if (requireAdopted && !Number.isFinite(adoptedAt)) return null;
+  if (!plan.window || typeof plan.window !== "object" || Array.isArray(plan.window)) return null;
+  const focusTargetMinutes = Number(plan.focusTargetMinutes);
+  if (!Number.isFinite(focusTargetMinutes) || focusTargetMinutes <= 0) return null;
+  const priorities = Array.isArray(plan.priorities) ? plan.priorities
+    .filter((priority) => priority && typeof priority === "object")
+    .slice(0, 3)
+    .map((priority, index) => ({
+      rank: Number(priority.rank) || index + 1,
+      taskId: priority.taskId === null || priority.taskId === undefined ? null : String(priority.taskId),
+      title: String(priority.title || "未命名任务"),
+      startAt: Number.isFinite(Number(priority.startAt)) ? Number(priority.startAt) : null,
+      deadlineAt: Number.isFinite(Number(priority.deadlineAt)) ? Number(priority.deadlineAt) : null,
+      overdue: Boolean(priority.overdue),
+      reasons: Array.isArray(priority.reasons) ? priority.reasons.map(String) : [],
+    })) : [];
+  const blocks = Array.isArray(plan.blocks) ? plan.blocks
+    .filter((block) => block && typeof block === "object"
+      && Number.isFinite(Number(block.startAt))
+      && Number.isFinite(Number(block.endAt))
+      && Number(block.endAt) > Number(block.startAt))
+    .slice(0, 3)
+    .map((block) => ({
+      id: String(block.id || ""),
+      taskId: block.taskId === null || block.taskId === undefined ? null : String(block.taskId),
+      title: String(block.title || "专注时段"),
+      startAt: Number(block.startAt),
+      endAt: Number(block.endAt),
+      minutes: Math.max(0, Number(block.minutes) || 0),
+    })) : [];
+  const warnings = Array.isArray(plan.warnings) ? plan.warnings
+    .filter((warning) => warning && typeof warning === "object")
+    .map((warning) => ({
+      code: String(warning.code || "PLAN_WARNING"),
+      severity: String(warning.severity || "warning"),
+      message: String(warning.message || "需要检查当前安排"),
+      sourceIds: Array.isArray(warning.sourceIds) ? warning.sourceIds.map(String) : [],
+    })) : [];
+  return {
+    version: Number(plan.version) || 1,
+    dayKey: dayKeyValue,
+    generated_at: generatedAt,
+    ...(Number.isFinite(adoptedAt) ? { adopted_at: adoptedAt } : {}),
+    window: {
+      startAt: Number(plan.window.startAt),
+      endAt: Number(plan.window.endAt),
+      planningStartAt: Number(plan.window.planningStartAt),
+    },
+    focusTargetMinutes,
+    priorities,
+    blocks,
+    warnings,
+  };
+}
+
+function hasDailyPlanContent(plan) {
+  return Boolean(plan && (plan.priorities.length > 0 || plan.blocks.length > 0));
+}
+
+function getAdoptedDailyPlan(dayKeyValue) {
+  const saved = state.dailyPlans && typeof state.dailyPlans === "object" && !Array.isArray(state.dailyPlans)
+    ? state.dailyPlans[dayKeyValue]
+    : null;
+  const normalized = normalizeDailyPlanForDisplay(saved, dayKeyValue, true);
+  return hasDailyPlanContent(normalized) ? normalized : null;
+}
+
+function createAdoptedDailyPlan(preview, adoptedAt) {
+  const timestamp = Number(adoptedAt);
+  const normalized = normalizeDailyPlanForDisplay(preview, dailyPlanDayKey(timestamp), false);
+  if (!Number.isFinite(timestamp) || !hasDailyPlanContent(normalized)) return null;
+  const completePlan = {
+    ...normalized,
+    adopted_at: timestamp,
+  };
+  return typeof structuredClone === "function"
+    ? structuredClone(completePlan)
+    : JSON.parse(JSON.stringify(completePlan));
+}
+
 function appendDailyPlanEmpty(titleText, bodyText, className = "") {
   const empty = document.createElement("div");
   empty.className = `daily-plan-empty${className ? ` ${className}` : ""}`;
@@ -3576,25 +3677,48 @@ function appendDailyPlanWarnings(warnings) {
   els.dailyPlanContent.append(section);
 }
 
-function renderDailyPlanPreview() {
+function renderDailyPlanPreview(now = Date.now()) {
   if (!els.dailyPlanCard || !els.dailyPlanContent || !els.dailyPlanGenerateButton) return;
-  els.dailyPlanCard.classList.toggle("is-loading", dailyPlanGenerating);
-  els.dailyPlanCard.classList.toggle("is-error", Boolean(dailyPlanPreviewError));
-  els.dailyPlanCard.setAttribute("aria-busy", String(dailyPlanGenerating));
-  els.dailyPlanGenerateButton.disabled = dailyPlanGenerating;
-  els.dailyPlanGenerateButton.setAttribute("aria-disabled", String(dailyPlanGenerating));
-  els.dailyPlanGenerateButton.textContent = dailyPlanPreview ? "重新编排" : "为我编排今天";
-  if (els.dailyPlanAdoptButton) els.dailyPlanAdoptButton.disabled = true;
-  if (els.dailyPlanNextStage) els.dailyPlanNextStage.hidden = !dailyPlanPreview || Boolean(dailyPlanPreviewError);
+  const todayKey = dailyPlanDayKey(now);
+  const preview = normalizeDailyPlanForDisplay(dailyPlanPreview, null, false);
+  const adoptedPlan = getAdoptedDailyPlan(todayKey);
+  const displayPlan = preview || adoptedPlan;
+  const hasValidPreview = hasDailyPlanContent(preview) && preview.dayKey === todayKey;
+  const isBusy = dailyPlanGenerating || dailyPlanAdopting;
+  els.dailyPlanCard.classList.toggle("is-loading", isBusy);
+  els.dailyPlanCard.classList.toggle("is-error", Boolean(dailyPlanPreviewError || dailyPlanAdoptionError));
+  els.dailyPlanCard.setAttribute("aria-busy", String(isBusy));
+  els.dailyPlanGenerateButton.disabled = isBusy;
+  els.dailyPlanGenerateButton.setAttribute("aria-disabled", String(isBusy));
+  els.dailyPlanGenerateButton.textContent = displayPlan ? "重新编排" : "为我编排今天";
+  if (els.dailyPlanAdoptButton) {
+    els.dailyPlanAdoptButton.hidden = !hasValidPreview;
+    els.dailyPlanAdoptButton.disabled = !hasValidPreview || isBusy || Boolean(dailyPlanPreviewError);
+    els.dailyPlanAdoptButton.setAttribute("aria-disabled", String(els.dailyPlanAdoptButton.disabled));
+    els.dailyPlanAdoptButton.textContent = dailyPlanAdopting ? "保存中…" : "采用到日程";
+  }
+  if (els.dailyPlanNextStage) {
+    const showReplacement = hasValidPreview && Boolean(adoptedPlan);
+    const showSaved = !preview && Boolean(adoptedPlan);
+    els.dailyPlanNextStage.hidden = !(showReplacement || showSaved);
+    els.dailyPlanNextStage.textContent = showReplacement
+      ? "采用后将替换今天已保存的编排"
+      : showSaved ? "今日编排已保存" : "";
+  }
   els.dailyPlanContent.replaceChildren();
 
-  if (dailyPlanPreviewError) {
+  if (dailyPlanAdoptionError) {
+    els.dailyPlanStatus.textContent = "保存失败";
+    appendDailyPlanEmpty("保存失败，请稍后重试", "当前预览仍保留在本机内存中。", "daily-plan-error");
+  } else if (dailyPlanPreviewError) {
     els.dailyPlanStatus.textContent = "生成失败";
     appendDailyPlanEmpty("暂时无法完成编排", "本地编排遇到问题，请稍后重新编排。", "daily-plan-error");
-    return;
   }
-  if (!dailyPlanPreview) {
-    els.dailyPlanStatus.textContent = dailyPlanGenerating ? "编排中" : "尚未生成";
+  if (!displayPlan) {
+    if (dailyPlanAdoptionError || dailyPlanPreviewError) return;
+    if (!dailyPlanAdoptionError && !dailyPlanPreviewError) {
+      els.dailyPlanStatus.textContent = dailyPlanGenerating ? "编排中" : "尚未生成";
+    }
     appendDailyPlanEmpty(
       dailyPlanGenerating ? "正在整理今天的安排…" : "把散落的一天，轻轻排成可以完成的样子。",
       dailyPlanGenerating ? "所有计算都在本机完成。" : "本地读取任务、课程、DDL 与近期专注节奏，生成三个重点和合适的专注时段。"
@@ -3602,21 +3726,26 @@ function renderDailyPlanPreview() {
     return;
   }
 
-  els.dailyPlanStatus.textContent = dailyPlanGenerating ? "重新编排中" : "预览已生成";
-  appendDailyPlanSummary(dailyPlanPreview);
-  appendDailyPlanPriorities(dailyPlanPreview.priorities.slice(0, 3));
-  appendDailyPlanBlocks(dailyPlanPreview.blocks.slice(0, 3));
-  if (dailyPlanPreview.priorities.length > 0 && dailyPlanPreview.blocks.length === 0) {
+  if (!dailyPlanAdoptionError && !dailyPlanPreviewError) {
+    els.dailyPlanStatus.textContent = dailyPlanAdopting
+      ? "保存中"
+      : dailyPlanGenerating ? "重新编排中" : preview ? "预览已生成" : "已采用";
+  }
+  appendDailyPlanSummary(displayPlan);
+  appendDailyPlanPriorities(displayPlan.priorities.slice(0, 3));
+  appendDailyPlanBlocks(displayPlan.blocks.slice(0, 3));
+  if (displayPlan.priorities.length > 0 && displayPlan.blocks.length === 0) {
     appendDailyPlanEmpty("暂时没有可用时段", "当前空闲段不足 20 分钟，可以先调整固定安排后重新编排。", "daily-plan-no-slots");
   }
-  appendDailyPlanWarnings(dailyPlanPreview.warnings);
+  appendDailyPlanWarnings(displayPlan.warnings);
 }
 
 async function generateDailyPlanPreview(now) {
-  if (dailyPlanGenerating) return false;
+  if (dailyPlanGenerating || dailyPlanAdopting) return false;
   dailyPlanGenerating = true;
   dailyPlanPreviewError = null;
-  renderDailyPlanPreview();
+  dailyPlanAdoptionError = null;
+  renderDailyPlanPreview(now);
   try {
     await Promise.resolve();
     const planner = globalThis.DailyPlanner;
@@ -3630,7 +3759,39 @@ async function generateDailyPlanPreview(now) {
     return false;
   } finally {
     dailyPlanGenerating = false;
-    renderDailyPlanPreview();
+    renderDailyPlanPreview(now);
+  }
+}
+
+async function adoptDailyPlanPreview(adoptedAt) {
+  const timestamp = Number(adoptedAt);
+  const plan = createAdoptedDailyPlan(dailyPlanPreview, timestamp);
+  if (dailyPlanAdopting || dailyPlanGenerating || dailyPlanPreviewError || !plan) return false;
+  dailyPlanAdopting = true;
+  dailyPlanAdoptionError = null;
+  renderDailyPlanPreview(timestamp);
+  await Promise.resolve();
+  const dayKeyValue = plan.dayKey;
+  const plans = state.dailyPlans;
+  const hadPrevious = Object.prototype.hasOwnProperty.call(plans, dayKeyValue);
+  const previousPlan = plans[dayKeyValue];
+  const previousSyncUpdatedAt = state.syncUpdatedAt;
+  try {
+    state.dailyPlans[dayKeyValue] = plan;
+    const result = saveState();
+    if (result === false) throw new Error("saveState returned false");
+    dailyPlanPreview = null;
+    return true;
+  } catch (error) {
+    console.error("Daily plan adoption failed:", error);
+    if (hadPrevious) state.dailyPlans[dayKeyValue] = previousPlan;
+    else delete state.dailyPlans[dayKeyValue];
+    state.syncUpdatedAt = previousSyncUpdatedAt;
+    dailyPlanAdoptionError = "保存失败，请稍后重试";
+    return false;
+  } finally {
+    dailyPlanAdopting = false;
+    renderDailyPlanPreview(timestamp);
   }
 }
 
@@ -3916,6 +4077,7 @@ function setActiveView(viewName) {
 
 els.startPauseButton.addEventListener("click", () => state.isRunning ? pauseTimer() : startTimer());
 els.dailyPlanGenerateButton.addEventListener("click", () => generateDailyPlanPreview(Date.now()));
+els.dailyPlanAdoptButton.addEventListener("click", () => adoptDailyPlanPreview(Date.now()));
 els.resetButton.addEventListener("click", resetTimer);
 els.fastFinishButton.addEventListener("click", fastFinishSession);
 els.plant.addEventListener("click", toggleFlower);

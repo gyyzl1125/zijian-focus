@@ -43,6 +43,7 @@ function createHarness({ state, planner = DailyPlanner } = {}) {
     Number,
     String,
     Promise,
+    structuredClone,
     globalThis: null,
     document,
     state: persistentState,
@@ -67,11 +68,14 @@ function createHarness({ state, planner = DailyPlanner } = {}) {
     let dailyPlanPreview = null;
     let dailyPlanPreviewError = null;
     let dailyPlanGenerating = false;
+    let dailyPlanAdopting = false;
+    let dailyPlanAdoptionError = null;
     ${previewSource}
     this.previewApi = {
       getInput: getDailyPlanPreviewInput,
       render: renderDailyPlanPreview,
       generate: generateDailyPlanPreview,
+      adopt: adoptDailyPlanPreview,
       get preview() { return dailyPlanPreview; },
       get generating() { return dailyPlanGenerating; },
       get error() { return dailyPlanPreviewError; }
@@ -91,7 +95,11 @@ test("index loads daily-planner.js before app.js", () => {
   assert.ok(plannerIndex >= 0 && appIndex > plannerIndex);
   assert.match(indexSource, /本地智能编排/);
   assert.match(appSource, /dailyPlanGenerateButton\.addEventListener\("click", \(\) => generateDailyPlanPreview\(Date\.now\(\)\)\)/);
-  assert.doesNotMatch(previewSource, /saveState\s*\(|localStorage|state\.dailyPlans\s*=/);
+  const generationSource = previewSource.slice(
+    previewSource.indexOf("async function generateDailyPlanPreview"),
+    previewSource.indexOf("async function adoptDailyPlanPreview")
+  );
+  assert.doesNotMatch(generationSource, /saveState\s*\(|localStorage|state\.dailyPlans\s*=/);
 });
 
 test("empty state renders the initial interface and an empty generated preview", async () => {
@@ -122,8 +130,9 @@ test("normal generation renders priorities, focus blocks, target and generated t
   assert.match(harness.els.dailyPlanContent.textContent, /建议单次专注 30 分钟/);
   assert.match(harness.els.dailyPlanContent.textContent, /生成于/);
   assert.equal(harness.els.dailyPlanGenerateButton.textContent, "重新编排");
-  assert.equal(harness.els.dailyPlanNextStage.hidden, false);
-  assert.equal(harness.els.dailyPlanAdoptButton.disabled, true);
+  assert.equal(harness.els.dailyPlanNextStage.hidden, true);
+  assert.equal(harness.els.dailyPlanAdoptButton.hidden, false);
+  assert.equal(harness.els.dailyPlanAdoptButton.disabled, false);
 });
 
 test("preview UI never renders more than three priorities or three blocks", async () => {

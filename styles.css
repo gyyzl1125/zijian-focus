@@ -258,6 +258,8 @@ body {
 .daily-plan-actions { display: grid; grid-template-columns: 1fr auto; gap: 9px; }
 .daily-plan-actions button { min-height: 44px; }
 .daily-plan-generate { border: 0; border-radius: 14px; background: var(--ink); color: var(--surface); font-weight: 900; }
+.daily-plan-adopt { min-height: 44px; border: 1px solid color-mix(in srgb, var(--primary), transparent 55%); border-radius: 14px; background: var(--surface); color: var(--ink); font-weight: 900; }
+.daily-plan-adopt:disabled { cursor: wait; opacity: .58; }
 .daily-plan-card.is-loading .daily-plan-content { opacity: .55; }
 .daily-plan-card.is-loading .daily-plan-generate { pointer-events: none; }
 .daily-plan-card.is-error { background: color-mix(in srgb, #c65353, var(--surface) 94%); }
@@ -270,7 +272,7 @@ body {
 .daily-plan-warnings { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
 .daily-plan-warning { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: start; padding: 9px 10px; border-radius: 13px; background: color-mix(in srgb, #d99a3e, var(--surface) 90%); color: var(--muted); font-size: .72rem; line-height: 1.45; }
 .daily-plan-warning strong { color: var(--ink); font-size: .68rem; }
-.daily-plan-next-stage { align-self: center; color: var(--muted); font-size: .7rem; line-height: 1.35; text-align: right; }
+.daily-plan-next-stage { grid-column: 1 / -1; align-self: center; color: var(--muted); font-size: .7rem; line-height: 1.35; }
 .daily-plan-generate:disabled { cursor: wait; opacity: .68; }
 .daily-plan-error p { color: #934343; }
 
