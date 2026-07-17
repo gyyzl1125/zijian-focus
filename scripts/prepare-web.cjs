@@ -10,6 +10,7 @@ const WEB_ASSETS = Object.freeze([
   "app.js",
   "daily-planner.js",
   "activity-sessions.js",
+  "habits.js",
   "sw.js",
   "manifest.webmanifest",
   "icon.svg",

@@ -414,6 +414,26 @@
         </section>
       </section>
 
+      <section class="app-view" id="habitView" data-view="habits" aria-label="习惯与今日打卡">
+        <section class="panel habit-panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Habits</p>
+              <h2>习惯与今日打卡</h2>
+            </div>
+            <button class="small-add-button" id="habitAddButton" type="button" aria-label="新增习惯">+</button>
+          </div>
+          <div class="habit-week-strip" id="habitWeekStrip" aria-label="选择打卡日期"></div>
+          <div class="habit-day-summary">
+            <div><strong id="habitSelectedDate">今天</strong><span id="habitCompletionText">0 / 0 完成</span></div>
+            <progress id="habitCompletionProgress" max="100" value="0" aria-label="当日习惯完成率"></progress>
+          </div>
+          <div class="habit-list" id="habitList"></div>
+          <p class="habit-empty" id="habitEmpty" hidden>这一天没有安排习惯</p>
+          <span class="visually-hidden" id="habitStatus" role="status" aria-live="polite"></span>
+        </section>
+      </section>
+
       <section class="app-view" id="heatmapView" data-view="heatmap" aria-label="热力图">
         <section class="panel heatmap-panel" aria-label="专注热力图">
           <div class="panel-header">
@@ -537,6 +557,7 @@
             <button type="button" data-view-target="stats"><span><strong>统计</strong><small>专注趋势与任务概览</small></span><b>›</b></button>
             <button type="button" data-view-target="screenTime"><span><strong>屏幕使用</strong><small>应用时长与每日变化</small></span><b>›</b></button>
             <button type="button" data-view-target="finance"><span><strong>我的账本</strong><small>预算、分类与消费分析</small></span><b>›</b></button>
+            <button type="button" data-view-target="habits"><span><strong>习惯与今日打卡</strong><small>重复行为、本周安排和完成进度</small></span><b>›</b></button>
             <button type="button" data-view-target="heatmap"><span><strong>热力图与装扮</strong><small>火苗、皮肤和花朵</small></span><b>›</b></button>
             <button type="button" data-view-target="settings"><span><strong>设置与数据</strong><small>主题、轮播和本地备份</small></span><b>›</b></button>
           </div></div>
@@ -581,6 +602,35 @@
           <button class="add-task-button" id="memoSubmitButton" type="submit">记下</button>
           <button class="ghost-button memo-cancel-edit" id="memoCancelEditButton" type="button" hidden>取消修改</button>
           <button class="memo-delete-button" id="memoDeleteButton" type="button" hidden>删除备忘</button>
+        </form>
+      </article>
+    </div>
+
+    <div class="habit-editor-sheet" id="habitEditorSheet" hidden>
+      <button class="event-sheet-backdrop" id="habitEditorBackdrop" type="button" aria-label="关闭习惯编辑"></button>
+      <article class="habit-editor-card" role="dialog" aria-modal="true" aria-labelledby="habitEditorTitle">
+        <button class="event-sheet-close" id="habitEditorClose" type="button" aria-label="关闭">×</button>
+        <p class="eyebrow">Habit</p>
+        <h3 id="habitEditorTitle">新增习惯</h3>
+        <form class="habit-form" id="habitForm">
+          <label><span>习惯名称</span><input id="habitTitle" type="text" maxlength="60" autocomplete="off" required /></label>
+          <div class="habit-form-grid">
+            <label><span>记录类型</span><select id="habitMetricType"><option value="boolean">完成 / 未完成</option><option value="count">计数</option><option value="duration">时长</option></select></label>
+            <label><span>颜色</span><select id="habitColor"><option value="sage">鼠尾草</option><option value="sky">天空蓝</option><option value="peach">蜜桃</option><option value="lavender">薰衣草</option><option value="lemon">柠檬</option><option value="rose">玫瑰</option></select></label>
+            <label id="habitTargetField"><span>目标值</span><input id="habitTargetValue" type="number" min="0.1" step="0.1" value="1" /></label>
+            <label id="habitUnitField"><span>单位</span><input id="habitUnit" type="text" maxlength="16" value="次" /></label>
+          </div>
+          <fieldset class="habit-days-fieldset"><legend>重复日期</legend><div class="habit-day-options">
+            <label><input type="checkbox" name="habitDay" value="1" checked /><span>一</span></label>
+            <label><input type="checkbox" name="habitDay" value="2" checked /><span>二</span></label>
+            <label><input type="checkbox" name="habitDay" value="3" checked /><span>三</span></label>
+            <label><input type="checkbox" name="habitDay" value="4" checked /><span>四</span></label>
+            <label><input type="checkbox" name="habitDay" value="5" checked /><span>五</span></label>
+            <label><input type="checkbox" name="habitDay" value="6" checked /><span>六</span></label>
+            <label><input type="checkbox" name="habitDay" value="7" checked /><span>日</span></label>
+          </div></fieldset>
+          <button class="primary-button" id="habitSubmitButton" type="submit">保存习惯</button>
+          <button class="habit-archive-button" id="habitArchiveButton" type="button" hidden>归档习惯</button>
         </form>
       </article>
     </div>
@@ -658,6 +708,7 @@
     <script src="./fflate.min.js?v=52"></script>
     <script src="./daily-planner.js?v=53"></script>
     <script src="./activity-sessions.js?v=1"></script>
+    <script src="./habits.js?v=1"></script>
     <script src="./app.js?v=53"></script>
   </body>
 </html>

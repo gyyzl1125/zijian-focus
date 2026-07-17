@@ -114,6 +114,7 @@ test("service worker precaches every local asset referenced by index", () => {
     .filter((asset) => asset !== "capacitor.js");
 
   assert.ok(localRefs.includes("daily-planner.js?v=53"));
+  assert.ok(localRefs.includes("habits.js?v=1"));
   localRefs.forEach((asset) => assert.match(worker, new RegExp(`"\\./${asset.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`)));
-  assert.match(worker, /const CACHE_NAME = "zijian-focus-v54"/);
+  assert.match(worker, /const CACHE_NAME = "zijian-focus-v55"/);
 });

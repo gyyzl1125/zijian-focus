@@ -91,6 +91,8 @@ const defaultState = {
   focusByDate: {},
   activitySessions: [],
   activeActivitySessionId: null,
+  habits: [],
+  habitEntries: [],
   selectedTaskColor: "sage",
   heatmapPalette: "forest",
   heatmapImage: "",
@@ -132,6 +134,8 @@ let deadlineSprintAdopting = false;
 let deadlineSprintAdoptionError = null;
 let deadlineSprintAdoptionNotice = null;
 let deadlineSprintConflictIds = new Set();
+let selectedHabitDate = dateKey();
+let editingHabitId = null;
 
 const els = {
   scene: document.querySelector("#scene"),
@@ -175,6 +179,29 @@ const els = {
   flameEarnedWeek: document.querySelector("#flameEarnedWeek"),
   flameSpentWeek: document.querySelector("#flameSpentWeek"),
   flameBalanceText: document.querySelector("#flameBalanceText"),
+  habitAddButton: document.querySelector("#habitAddButton"),
+  habitWeekStrip: document.querySelector("#habitWeekStrip"),
+  habitSelectedDate: document.querySelector("#habitSelectedDate"),
+  habitCompletionText: document.querySelector("#habitCompletionText"),
+  habitCompletionProgress: document.querySelector("#habitCompletionProgress"),
+  habitList: document.querySelector("#habitList"),
+  habitEmpty: document.querySelector("#habitEmpty"),
+  habitStatus: document.querySelector("#habitStatus"),
+  habitEditorSheet: document.querySelector("#habitEditorSheet"),
+  habitEditorBackdrop: document.querySelector("#habitEditorBackdrop"),
+  habitEditorClose: document.querySelector("#habitEditorClose"),
+  habitEditorTitle: document.querySelector("#habitEditorTitle"),
+  habitForm: document.querySelector("#habitForm"),
+  habitTitle: document.querySelector("#habitTitle"),
+  habitMetricType: document.querySelector("#habitMetricType"),
+  habitColor: document.querySelector("#habitColor"),
+  habitTargetField: document.querySelector("#habitTargetField"),
+  habitTargetValue: document.querySelector("#habitTargetValue"),
+  habitUnitField: document.querySelector("#habitUnitField"),
+  habitUnit: document.querySelector("#habitUnit"),
+  habitDayInputs: [...document.querySelectorAll('input[name="habitDay"]')],
+  habitSubmitButton: document.querySelector("#habitSubmitButton"),
+  habitArchiveButton: document.querySelector("#habitArchiveButton"),
   streakDays: document.querySelector("#streakDays"),
   streakPill: document.querySelector("#streakPill"),
   streakHint: document.querySelector("#streakHint"),
@@ -494,6 +521,14 @@ function normalizeState() {
     state.activitySessions = Array.isArray(state.activitySessions) ? state.activitySessions : [];
     state.activeActivitySessionId = null;
   }
+  const habitApi = globalThis.Habits;
+  if (habitApi?.normalizeHabits && habitApi?.normalizeHabitEntries) {
+    state.habits = habitApi.normalizeHabits(state.habits, Date.now());
+    state.habitEntries = habitApi.normalizeHabitEntries(state.habitEntries, Date.now());
+  } else {
+    state.habits = Array.isArray(state.habits) ? state.habits : [];
+    state.habitEntries = Array.isArray(state.habitEntries) ? state.habitEntries : [];
+  }
   state.deletions = normalizeDeletionRegistry(state.deletions);
   state.tasks = filterDeletedEntities(state.tasks, state.deletions.tasks);
   state.flames = Number(state.flames || 0);
@@ -705,6 +740,14 @@ function mergeSyncedStates(local, remote) {
     merged.activitySessions = mergeById(local?.activitySessions, remote?.activitySessions, preferRemote);
     merged.activeActivitySessionId = null;
   }
+  const habitApi = globalThis.Habits;
+  if (habitApi?.mergeHabits && habitApi?.mergeHabitEntries) {
+    merged.habits = habitApi.mergeHabits(local?.habits, remote?.habits);
+    merged.habitEntries = habitApi.mergeHabitEntries(local?.habitEntries, remote?.habitEntries);
+  } else {
+    merged.habits = mergeById(local?.habits, remote?.habits, preferRemote);
+    merged.habitEntries = mergeById(local?.habitEntries, remote?.habitEntries, preferRemote);
+  }
   merged.tasks = filterDeletedEntities(
     mergeById(local?.tasks, remote?.tasks, preferRemote),
     merged.deletions.tasks
@@ -743,6 +786,14 @@ function cloudSafeState() {
   } else {
     snapshot.activitySessions = Array.isArray(snapshot.activitySessions) ? snapshot.activitySessions : [];
     snapshot.activeActivitySessionId = null;
+  }
+  const habitApi = globalThis.Habits;
+  if (habitApi?.normalizeHabits && habitApi?.normalizeHabitEntries) {
+    snapshot.habits = habitApi.normalizeHabits(snapshot.habits, Date.now());
+    snapshot.habitEntries = habitApi.normalizeHabitEntries(snapshot.habitEntries, Date.now());
+  } else {
+    snapshot.habits = Array.isArray(snapshot.habits) ? snapshot.habits : [];
+    snapshot.habitEntries = Array.isArray(snapshot.habitEntries) ? snapshot.habitEntries : [];
   }
   snapshot.deletions = normalizeDeletionRegistry(snapshot.deletions);
   snapshot.tasks = filterDeletedEntities(snapshot.tasks, snapshot.deletions.tasks);
@@ -3172,6 +3223,249 @@ function renderMemos() {
   });
 }
 
+function habitApi() {
+  return globalThis.Habits;
+}
+
+function setHabitStatus(message) {
+  if (els.habitStatus) els.habitStatus.textContent = String(message || "");
+}
+
+function updateHabitMetricFields() {
+  if (!els.habitMetricType) return;
+  const metricType = els.habitMetricType.value;
+  const isBoolean = metricType === "boolean";
+  els.habitTargetField.hidden = isBoolean;
+  els.habitUnitField.hidden = isBoolean;
+  if (metricType === "duration" && (!els.habitUnit.value || els.habitUnit.value === "次")) els.habitUnit.value = "分钟";
+  if (metricType === "count" && (!els.habitUnit.value || els.habitUnit.value === "分钟")) els.habitUnit.value = "次";
+  if (isBoolean) els.habitTargetValue.value = "1";
+}
+
+function resetHabitForm() {
+  editingHabitId = null;
+  els.habitForm?.reset?.();
+  if (els.habitMetricType) els.habitMetricType.value = "boolean";
+  if (els.habitColor) els.habitColor.value = "sage";
+  if (els.habitTargetValue) els.habitTargetValue.value = "1";
+  if (els.habitUnit) els.habitUnit.value = "次";
+  els.habitDayInputs?.forEach((input) => { input.checked = true; });
+  if (els.habitEditorTitle) els.habitEditorTitle.textContent = "新增习惯";
+  if (els.habitSubmitButton) els.habitSubmitButton.textContent = "保存习惯";
+  if (els.habitArchiveButton) els.habitArchiveButton.hidden = true;
+  updateHabitMetricFields();
+}
+
+function openHabitEditor(habit = null) {
+  resetHabitForm();
+  if (habit) {
+    editingHabitId = String(habit.id);
+    els.habitEditorTitle.textContent = "编辑习惯";
+    els.habitSubmitButton.textContent = "保存修改";
+    els.habitArchiveButton.hidden = false;
+    els.habitTitle.value = habit.title;
+    els.habitMetricType.value = habit.metricType;
+    els.habitColor.value = habit.color;
+    els.habitTargetValue.value = String(habit.targetValue);
+    els.habitUnit.value = habit.unit;
+    const days = new Set(habit.daysOfWeek);
+    els.habitDayInputs.forEach((input) => { input.checked = days.has(Number(input.value)); });
+    updateHabitMetricFields();
+  }
+  els.habitEditorSheet.hidden = false;
+  document.body.classList.add("has-habit-editor");
+  els.habitTitle?.focus?.();
+}
+
+function closeHabitEditor() {
+  if (els.habitEditorSheet) els.habitEditorSheet.hidden = true;
+  document.body.classList.remove("has-habit-editor");
+  resetHabitForm();
+}
+
+function persistHabitCollections(nextHabits, nextEntries, successMessage) {
+  const previousHabits = state.habits;
+  const previousEntries = state.habitEntries;
+  const previousSyncUpdatedAt = state.syncUpdatedAt;
+  state.habits = nextHabits;
+  state.habitEntries = nextEntries;
+  try {
+    const saved = saveState();
+    if (saved === false) throw new Error("HABIT_SAVE_FAILED");
+    renderHabits();
+    setHabitStatus(successMessage);
+    return true;
+  } catch (error) {
+    state.habits = previousHabits;
+    state.habitEntries = previousEntries;
+    state.syncUpdatedAt = previousSyncUpdatedAt;
+    renderHabits();
+    setHabitStatus("保存失败，请稍后重试");
+    return false;
+  }
+}
+
+function habitDraftFromForm() {
+  return {
+    title: String(els.habitTitle?.value || "").trim(),
+    color: els.habitColor?.value || "sage",
+    metricType: els.habitMetricType?.value || "boolean",
+    targetValue: Number(els.habitTargetValue?.value || 1),
+    unit: String(els.habitUnit?.value || "").trim(),
+    daysOfWeek: els.habitDayInputs.filter((input) => input.checked).map((input) => Number(input.value)),
+  };
+}
+
+function saveHabitFromForm(event, now = Date.now()) {
+  event?.preventDefault?.();
+  const api = habitApi();
+  const draft = habitDraftFromForm();
+  if (!draft.title || draft.daysOfWeek.length === 0) {
+    setHabitStatus("请填写习惯名称并至少选择一天");
+    return false;
+  }
+  const result = editingHabitId
+    ? api?.updateHabit?.({ habits: state.habits, habitId: editingHabitId, changes: draft, now })
+    : api?.createHabit?.({ habits: state.habits, draft, now, idFactory: () => crypto.randomUUID() });
+  if (!result?.ok) {
+    setHabitStatus("习惯没有保存，请检查填写内容");
+    return false;
+  }
+  const saved = persistHabitCollections(result.habits, state.habitEntries, editingHabitId ? "习惯已更新" : "习惯已创建");
+  if (saved) closeHabitEditor();
+  return saved;
+}
+
+function archiveEditingHabit(now = Date.now()) {
+  if (!editingHabitId) return false;
+  const habit = state.habits.find((item) => String(item.id) === editingHabitId);
+  if (!habit || !window.confirm(`确定归档习惯“${String(habit.title)}”吗？历史打卡仍会保留。`)) return false;
+  const result = habitApi()?.archiveHabit?.({ habits: state.habits, habitId: editingHabitId, now });
+  if (!result?.ok) return false;
+  const saved = persistHabitCollections(result.habits, state.habitEntries, "习惯已归档");
+  if (saved) closeHabitEditor();
+  return saved;
+}
+
+function setHabitValue(habitId, value, now = Date.now()) {
+  const habit = state.habits.find((item) => String(item.id) === String(habitId) && item.archivedAt === null);
+  if (!habit) return false;
+  const result = habitApi()?.setHabitEntry?.({ entries: state.habitEntries, habit, dayKey: selectedHabitDate, value, now });
+  if (!result?.ok) return result?.reason === "NO_CHANGE";
+  return persistHabitCollections(state.habits, result.entries, Number(value) >= habit.targetValue ? "打卡完成" : "打卡已更新");
+}
+
+function renderHabitWeekStrip() {
+  if (!els.habitWeekStrip) return;
+  const labels = ["一", "二", "三", "四", "五", "六", "日"];
+  const selected = new Date(`${selectedHabitDate}T00:00:00`);
+  const start = getWeekStart(selected);
+  const today = dateKey();
+  els.habitWeekStrip.replaceChildren();
+  for (let index = 0; index < 7; index += 1) {
+    const day = new Date(start);
+    day.setDate(start.getDate() + index);
+    const key = dateKey(day);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "habit-day-button";
+    button.classList.toggle("is-selected", key === selectedHabitDate);
+    button.classList.toggle("is-today", key === today);
+    button.setAttribute("aria-pressed", String(key === selectedHabitDate));
+    const label = document.createElement("span");
+    label.textContent = `周${labels[index]}`;
+    const number = document.createElement("strong");
+    number.textContent = String(day.getDate());
+    button.append(label, number);
+    button.addEventListener("click", () => {
+      selectedHabitDate = key;
+      renderHabits();
+    });
+    els.habitWeekStrip.append(button);
+  }
+}
+
+function renderHabitValueControl(habit, entry) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "habit-value-control";
+  const currentValue = Number(entry?.value || 0);
+  if (habit.metricType === "boolean") {
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "habit-check-button";
+    const completed = currentValue >= habit.targetValue;
+    toggle.classList.toggle("is-complete", completed);
+    toggle.textContent = completed ? "取消打卡" : "完成打卡";
+    toggle.setAttribute("aria-pressed", String(completed));
+    toggle.addEventListener("click", () => setHabitValue(habit.id, completed ? 0 : 1, Date.now()));
+    wrapper.append(toggle);
+    return wrapper;
+  }
+  const step = habit.metricType === "duration" ? 5 : 1;
+  const decrease = document.createElement("button");
+  decrease.type = "button";
+  decrease.textContent = "−";
+  decrease.setAttribute("aria-label", `减少 ${habit.title}`);
+  const input = document.createElement("input");
+  input.type = "number";
+  input.min = "0";
+  input.step = String(step);
+  input.value = String(currentValue);
+  input.setAttribute("aria-label", `${habit.title} 当前${habit.unit || "数值"}`);
+  const increase = document.createElement("button");
+  increase.type = "button";
+  increase.textContent = "+";
+  increase.setAttribute("aria-label", `增加 ${habit.title}`);
+  const commit = (value) => setHabitValue(habit.id, Math.max(0, Number(value) || 0), Date.now());
+  decrease.addEventListener("click", () => commit(currentValue - step));
+  increase.addEventListener("click", () => commit(currentValue + step));
+  input.addEventListener("change", () => commit(input.value));
+  wrapper.append(decrease, input, increase);
+  return wrapper;
+}
+
+function renderHabits() {
+  if (!els.habitList || !habitApi()) return;
+  renderHabitWeekStrip();
+  const habits = habitApi().getHabitsForDay(state.habits, selectedHabitDate);
+  const entries = habitApi().normalizeHabitEntries(state.habitEntries, Date.now());
+  const summary = habitApi().getHabitCompletionSummary(state.habits, entries, selectedHabitDate);
+  const selected = new Date(`${selectedHabitDate}T00:00:00`);
+  els.habitSelectedDate.textContent = `${selected.getMonth() + 1}月${selected.getDate()}日`;
+  els.habitCompletionText.textContent = `${summary.completed} / ${summary.scheduled} 完成`;
+  els.habitCompletionProgress.value = Math.round(summary.rate * 100);
+  els.habitList.replaceChildren();
+  els.habitEmpty.hidden = habits.length > 0;
+  habits.forEach((habit) => {
+    const entry = entries.find((item) => item.habitId === habit.id && item.dayKey === selectedHabitDate) || null;
+    const completed = habitApi().isHabitComplete(habit, entry);
+    const color = getTaskColor(habit.color);
+    const card = document.createElement("article");
+    card.className = "habit-card";
+    card.classList.toggle("is-complete", completed);
+    card.style.setProperty("--habit-bg", color.bg);
+    card.style.setProperty("--habit-border", color.border);
+    card.style.setProperty("--habit-ink", color.ink);
+    const copy = document.createElement("div");
+    copy.className = "habit-card-copy";
+    const title = document.createElement("strong");
+    title.textContent = habit.title;
+    const meta = document.createElement("span");
+    const value = Number(entry?.value || 0);
+    meta.textContent = habit.metricType === "boolean"
+      ? completed ? "今日已完成" : "今日待完成"
+      : `${value} / ${habit.targetValue} ${habit.unit}`;
+    copy.append(title, meta);
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.className = "habit-edit-button";
+    edit.textContent = "编辑";
+    edit.addEventListener("click", () => openHabitEditor(habit));
+    card.append(copy, renderHabitValueControl(habit, entry), edit);
+    els.habitList.append(card);
+  });
+}
+
 function renderHeatmap() {
   els.heatmap.innerHTML = "";
   els.heatmap.classList.toggle("has-image", Boolean(state.heatmapImage));
@@ -4335,6 +4629,7 @@ function render() {
   renderWeekSchedule();
   renderDdl();
   renderMemos();
+  renderHabits();
   renderHeatmap();
   renderStreak();
   renderWidgets();
@@ -5735,7 +6030,7 @@ function setActiveView(viewName) {
   activeView = viewName;
   document.body.dataset.view = viewName;
   els.views.forEach((view) => view.classList.toggle("is-active", view.dataset.view === viewName));
-  const primaryView = ["tasks", "timeline", "week", "ddl", "stats", "screenTime", "finance", "heatmap", "settings"].includes(viewName)
+  const primaryView = ["tasks", "timeline", "week", "ddl", "stats", "screenTime", "finance", "habits", "heatmap", "settings"].includes(viewName)
     ? "profile"
     : viewName;
   els.navButtons.forEach((button) => {
@@ -5746,6 +6041,7 @@ function setActiveView(viewName) {
   if (viewName === "week") renderWeekSchedule();
   if (viewName === "ddl") renderDdl();
   if (viewName === "memo") renderMemos();
+  if (viewName === "habits") renderHabits();
   if (viewName === "settings") renderThemes();
   if (viewName === "screenTime") loadUsageStats();
   if (viewName === "finance") refreshPaymentAccess();
@@ -5760,6 +6056,12 @@ els.timelineTaskSelect?.addEventListener("change", () => {
 });
 els.timelineStartButton?.addEventListener("click", () => startSelectedTaskActivity(Date.now()));
 els.timelineEndButton?.addEventListener("click", () => endCurrentTaskActivity(Date.now()));
+els.habitAddButton?.addEventListener("click", () => openHabitEditor());
+els.habitEditorBackdrop?.addEventListener("click", closeHabitEditor);
+els.habitEditorClose?.addEventListener("click", closeHabitEditor);
+els.habitMetricType?.addEventListener("change", updateHabitMetricFields);
+els.habitForm?.addEventListener("submit", (event) => saveHabitFromForm(event, Date.now()));
+els.habitArchiveButton?.addEventListener("click", () => archiveEditingHabit(Date.now()));
 els.dailyPlanGenerateButton.addEventListener("click", () => generateDailyPlanPreview(Date.now()));
 els.dailyPlanAdoptButton.addEventListener("click", () => adoptDailyPlanPreview(Date.now()));
 els.dailyPlanBalancedModeButton?.addEventListener("click", () => setDailyPlanMode("balanced", Date.now()));

@@ -1,4 +1,4 @@
-const CACHE_NAME = "zijian-focus-v54";
+const CACHE_NAME = "zijian-focus-v55";
 const ASSETS = [
   "./",
   "./index.html",
@@ -6,6 +6,7 @@ const ASSETS = [
   "./fflate.min.js?v=52",
   "./daily-planner.js?v=53",
   "./activity-sessions.js?v=1",
+  "./habits.js?v=1",
   "./app.js?v=53",
   "./manifest.webmanifest?v=52",
   "./icon.svg?v=52",
