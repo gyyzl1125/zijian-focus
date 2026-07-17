@@ -56,6 +56,7 @@ function sprintElements(document) {
     deadlineSprintContent: document.querySelector("#deadlineSprintContent"),
     deadlineSprintSelection: document.querySelector("#deadlineSprintSelection"),
     deadlineSprintAdoptButton: document.querySelector("#deadlineSprintAdoptButton"),
+    deadlineSprintAdoptionMessage: document.querySelector("#deadlineSprintAdoptionMessage"),
   };
 }
 
@@ -104,6 +105,10 @@ function createHarness({ state = baseState(), planner = DailyPlanner } = {}) {
     let deadlineSprintTaskId = null;
     let deadlineSprintGenerating = false;
     let deadlineSprintError = null;
+    let deadlineSprintAdopting = false;
+    let deadlineSprintAdoptionError = null;
+    let deadlineSprintAdoptionNotice = null;
+    let deadlineSprintConflictIds = new Set();
     ${previewSource}
     this.sprintApi = {
       renderMode: renderDailyPlanMode,
@@ -221,15 +226,16 @@ test("individual candidates toggle and update count, minutes and day totals", as
   assert.equal(harness.api.getStats().count, 1);
 });
 
-test("adopt remains disabled with or without a selection", async () => {
+test("adopt is enabled only while at least one candidate is selected", async () => {
   const harness = createHarness({ state: baseState({ tasks: [makeTask("task", "报告", localTime(16, 12))] }) });
   harness.api.setMode("deadline-sprint", NOW);
   harness.api.selectTask("task", NOW);
   await harness.api.generate(NOW);
   assert.equal(harness.els.deadlineSprintAdoptButton.disabled, true);
   harness.api.toggle(harness.api.preview.candidates[0].id, true);
+  assert.equal(harness.els.deadlineSprintAdoptButton.disabled, false);
+  harness.api.toggle(harness.api.preview.candidates[0].id, false);
   assert.equal(harness.els.deadlineSprintAdoptButton.disabled, true);
-  assert.match(harness.document.querySelector(".deadline-sprint-next-stage").textContent, /下一阶段开放/);
 });
 
 test("regeneration clears the old selection and replaces candidates", async () => {
@@ -391,9 +397,9 @@ test("mobile layout has explicit min-width and overflow safeguards", () => {
   assert.match(stylesSource, /overflow-wrap:\s*anywhere/);
 });
 
-test("sprint source contains no persistence calls or preview input dependency", () => {
+test("candidate generation source contains no persistence calls or balanced preview dependency", () => {
   const sprintStart = previewSource.indexOf("function getDeadlineSprintEligibleTasks");
-  const sprintEnd = previewSource.indexOf("function dailyPlanClock", sprintStart);
+  const sprintEnd = previewSource.indexOf("function deadlineSprintIntervalsOverlap", sprintStart);
   const sprintSource = previewSource.slice(sprintStart, sprintEnd);
   assert.doesNotMatch(sprintSource, /saveState\s*\(|localStorage|state\.dailyPlans\s*=(?!=)|\bdailyPlanPreview\b/);
   assert.match(indexSource, /均衡编排/);

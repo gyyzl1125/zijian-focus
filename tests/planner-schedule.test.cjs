@@ -178,7 +178,7 @@ test("week schedule places adopted blocks on the correct day and time", () => {
   const card = tuesdayColumn.querySelector(".is-planned-focus");
   assert.ok(card);
   assert.equal(card.style.getPropertyValue("--event-top"), "20%");
-  assert.equal(card.style.getPropertyValue("--event-height"), "6%");
+  assert.equal(card.style.getPropertyValue("--event-height"), "3.3333333333333335%");
   assert.match(card.textContent, /10:00阅读计划专注/);
 });
 
@@ -306,8 +306,25 @@ test("a fresh page harness restores planned focus solely from persisted dailyPla
   assert.match(harness.els.timelineList.textContent, /已恢复/);
 });
 
+test("version 2 plans render more than three adopted sprint blocks", () => {
+  const sprintBlocks = Array.from({ length: 5 }, (_, index) => block(
+    `sprint-${index}`,
+    "task-1",
+    `冲刺 ${index + 1}`,
+    at(MONDAY, 8 + index),
+    at(MONDAY, 8 + index, 45),
+    { planningMode: "deadline-sprint", sprintId: "sprint", deadlineAt: at(TUESDAY, 18), sequence: index + 1 }
+  ));
+  const plan = adoptedPlan(MONDAY, sprintBlocks, { version: 2, mode: "deadline-sprint", focusTargetMinutes: 45 });
+  const harness = createHarness({ state: baseState({ tasks: [{ id: "task-1" }], dailyPlans: { [MONDAY]: plan } }) });
+  harness.api.renderTimeline();
+  assert.equal(harness.document.querySelectorAll(".timeline-task-card.is-planned-focus").length, 5);
+  harness.api.renderWeekSchedule();
+  assert.equal(harness.document.querySelectorAll(".week-block.is-planned-focus").length, 5);
+});
+
 test("planned week blocks retain mobile overflow safeguards and accessible labels", () => {
-  assert.match(stylesSource, /\.week-block \{[\s\S]*?max-width: calc\(100% - 12px\);[\s\S]*?overflow: hidden;/);
+  assert.match(stylesSource, /\.week-block \{[\s\S]*?max-width: calc\(100% - 8px\);[\s\S]*?overflow: hidden;/);
   assert.match(stylesSource, /\.week-block\.is-planned-focus/);
   assert.match(stylesSource, /@media[\s\S]*?\.week-block span \{[\s\S]*?overflow: hidden;/);
   assert.match(appSource, /setAttribute\("aria-label", `计划专注/);

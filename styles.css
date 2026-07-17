@@ -294,6 +294,7 @@ body {
 .deadline-sprint-candidates { display: grid; min-width: 0; gap: 8px; }
 .deadline-sprint-candidate { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: center; min-width: 0; padding: 11px; border: 1px solid color-mix(in srgb, var(--primary), transparent 72%); border-radius: 15px; background: var(--surface); cursor: pointer; }
 .deadline-sprint-candidate:has(input:checked) { border-color: color-mix(in srgb, var(--primary), transparent 30%); background: color-mix(in srgb, var(--primary), var(--surface) 94%); }
+.deadline-sprint-candidate.is-conflict { border-color: color-mix(in srgb, #b94747, transparent 35%); background: color-mix(in srgb, #b94747, var(--surface) 94%); }
 .deadline-sprint-candidate input { width: 19px; height: 19px; margin: 0; accent-color: var(--primary); }
 .deadline-sprint-candidate > span { display: grid; min-width: 0; gap: 2px; }
 .deadline-sprint-candidate strong, .deadline-sprint-candidate span, .deadline-sprint-candidate small { min-width: 0; overflow-wrap: anywhere; }
@@ -305,7 +306,8 @@ body {
 .deadline-sprint-selection span { color: var(--muted); font-size: .68rem; }
 .deadline-sprint-selection p { margin: 4px 0 0; color: #946321; font-size: .7rem; line-height: 1.45; }
 .deadline-sprint-adopt { width: 100%; }
-.deadline-sprint-next-stage { margin: -4px 0 0; color: var(--muted); font-size: .68rem; text-align: center; }
+.deadline-sprint-adoption-message { margin: -4px 0 0; color: var(--muted); font-size: .72rem; text-align: center; overflow-wrap: anywhere; }
+.deadline-sprint-success { border-color: color-mix(in srgb, var(--primary), transparent 55%); }
 
 .metric-card {
   display: flex;
@@ -1690,16 +1692,17 @@ body[data-skin="night"] .scene {
 .week-block {
   position: absolute;
   top: var(--event-top, 0);
-  right: 6px;
-  left: 6px;
+  right: auto;
+  left: calc(var(--event-left, 0%) + 4px);
   isolation: isolate;
   display: grid;
   align-content: center;
   gap: 2px;
-  min-height: 30px;
+  min-height: 32px;
   height: var(--event-height, 10%);
+  width: calc(var(--event-width, 100%) - 8px);
   min-width: 0;
-  max-width: calc(100% - 12px);
+  max-width: calc(100% - 8px);
   overflow: hidden;
   padding: 6px;
   border: 2px solid var(--week-block-border, #9bc9e8);
@@ -1733,16 +1736,38 @@ body[data-skin="night"] .scene {
 }
 
 .week-block.is-planned-focus {
-  border-style: dashed;
-  border-color: #8f79c9;
-  background: color-mix(in srgb, #8f79c9, var(--surface) 88%);
+  border-width: 1px;
+  border-style: solid;
+  border-color: color-mix(in srgb, #8f79c9, transparent 45%);
+  background: color-mix(in srgb, #8f79c9, var(--surface) 92%);
   color: color-mix(in srgb, #4c376f, var(--ink) 30%);
-  box-shadow: inset 0 0 0 999px rgba(255, 255, 255, 0.05);
+  box-shadow: none;
 }
 
 .week-block.is-planned-focus::before {
   background: #8f79c9;
+  height: 2px;
+  opacity: 0.55;
 }
+
+.week-block.is-overlap-summary {
+  border: 1px solid color-mix(in srgb, var(--primary), transparent 45%);
+  background: color-mix(in srgb, var(--primary), var(--surface) 90%);
+  color: var(--ink);
+}
+
+.week-block.is-overlap-summary::before { height: 2px; opacity: 0.55; }
+.week-block.is-overlap-summary strong { font-size: 0.78rem; }
+.week-block.is-overlap-summary span { font-size: 0.62rem; -webkit-line-clamp: 1; }
+
+.week-block.is-compact {
+  align-content: start;
+  gap: 1px;
+  padding-top: 4px;
+}
+
+.week-block.is-compact span { -webkit-line-clamp: 1; }
+.week-block.is-compact small { display: none; }
 
 .week-block strong {
   overflow: hidden;
@@ -4072,13 +4097,18 @@ button.timeline-task-card {
 
   .week-board {
     display: grid;
-    grid-template-columns: repeat(7, minmax(0, 1fr));
-    gap: 4px;
+    grid-template-columns: repeat(7, minmax(148px, 148px));
+    gap: 6px;
     height: 100%;
     min-height: 0;
-    overflow: hidden;
-    padding-bottom: 4px;
-    touch-action: pan-y;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0 2px 8px;
+    scroll-behavior: smooth;
+    scroll-snap-type: x proximity;
+    scrollbar-width: thin;
+    overscroll-behavior-inline: contain;
+    touch-action: pan-x pan-y;
   }
 
   .week-column {
@@ -4087,6 +4117,7 @@ button.timeline-task-card {
     height: 100%;
     min-height: 0;
     border-radius: 12px;
+    scroll-snap-align: start;
   }
 
   .week-column header {
@@ -4109,10 +4140,11 @@ button.timeline-task-card {
   }
 
   .week-block {
-    right: 3px;
-    left: 3px;
     gap: 1px;
-    min-height: 34px;
+    min-height: 32px;
+    max-width: calc(100% - 6px);
+    width: calc(var(--event-width, 100%) - 6px);
+    left: calc(var(--event-left, 0%) + 3px);
     padding: 4px 3px;
     border-radius: 8px;
   }

@@ -232,6 +232,21 @@ test("TASK_DELETED warnings are retained on empty plans and never duplicated", (
   assert.deepEqual(state.dailyPlans[TODAY].warnings[0], warning);
 });
 
+test("deleting a sprint task recalculates version 2 plan mode", () => {
+  const mixed = plan(TODAY, ["gone", "keep"], {
+    version: 2,
+    mode: "mixed",
+    blocks: [
+      { id: "sprint", taskId: "gone", title: "冲刺", startAt: NOW + 1000, endAt: NOW + 2000, minutes: 25, planningMode: "deadline-sprint" },
+      { id: "balanced", taskId: "keep", title: "均衡", startAt: NOW + 3000, endAt: NOW + 4000, minutes: 25, planningMode: "balanced" },
+    ],
+  });
+  const state = baseState({ tasks: [task("gone")], dailyPlans: { [TODAY]: mixed } });
+  createDeletionHarness(state).api.deleteTaskById("gone", NOW);
+  assert.equal(state.dailyPlans[TODAY].mode, "balanced");
+  assert.deepEqual(state.dailyPlans[TODAY].blocks.map((block) => block.id), ["balanced"]);
+});
+
 test("a current preview referencing the deleted task is cleared and marked for regeneration", () => {
   const state = baseState({ tasks: [task("gone")] });
   const harness = createDeletionHarness(state, plan(TODAY, ["gone"]));

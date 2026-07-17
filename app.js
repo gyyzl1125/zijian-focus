@@ -125,6 +125,10 @@ let deadlineSprintSelectedIds = new Set();
 let deadlineSprintTaskId = null;
 let deadlineSprintGenerating = false;
 let deadlineSprintError = null;
+let deadlineSprintAdopting = false;
+let deadlineSprintAdoptionError = null;
+let deadlineSprintAdoptionNotice = null;
+let deadlineSprintConflictIds = new Set();
 
 const els = {
   scene: document.querySelector("#scene"),
@@ -281,6 +285,7 @@ const els = {
   deadlineSprintContent: document.querySelector("#deadlineSprintContent"),
   deadlineSprintSelection: document.querySelector("#deadlineSprintSelection"),
   deadlineSprintAdoptButton: document.querySelector("#deadlineSprintAdoptButton"),
+  deadlineSprintAdoptionMessage: document.querySelector("#deadlineSprintAdoptionMessage"),
   profileFlames: document.querySelector("#profileFlames"),
   usagePermissionCard: document.querySelector("#usagePermissionCard"),
   usagePermissionButton: document.querySelector("#usagePermissionButton"),
@@ -1266,11 +1271,19 @@ function removeDeletedTaskReferencesFromPlans(plans, taskIds, deletedAt, revised
         });
       }
     });
+    const nextBlocks = blocks.filter((item) => !taskIds.has(String(item?.taskId)));
+    const nextBlockModes = new Set(nextBlocks.map((block) => String(block?.planningMode || "").toLowerCase() === "deadline-sprint"
+      ? "deadline-sprint"
+      : "balanced"));
+    const nextMode = nextBlockModes.has("deadline-sprint") && nextBlockModes.has("balanced")
+      ? "mixed"
+      : nextBlockModes.has("deadline-sprint") ? "deadline-sprint" : "balanced";
     nextPlans[dayKeyValue] = {
       ...plan,
+      ...(Number(plan.version) === 2 ? { mode: nextMode } : {}),
       adopted_at: Math.max(Number.isFinite(Number(plan.adopted_at)) ? Number(plan.adopted_at) : 0, revisedAt),
       priorities: priorities.filter((item) => !taskIds.has(String(item?.taskId))),
-      blocks: blocks.filter((item) => !taskIds.has(String(item?.taskId))),
+      blocks: nextBlocks,
       warnings,
     };
   });
@@ -1982,6 +1995,94 @@ function renderTimeline() {
   }
 }
 
+function layoutOverlappingEvents(events) {
+  const sorted = (Array.isArray(events) ? events : [])
+    .filter((event) => event && typeof event === "object"
+      && String(event.id || "").trim()
+      && Number.isFinite(Number(event.startAt))
+      && Number.isFinite(Number(event.endAt))
+      && Number(event.endAt) > Number(event.startAt))
+    .map((event) => ({ ...event, startAt: Number(event.startAt), endAt: Number(event.endAt) }))
+    .sort((a, b) => a.startAt - b.startAt || a.endAt - b.endAt || String(a.id).localeCompare(String(b.id)));
+  const groups = [];
+  let current = [];
+  let currentEndAt = -Infinity;
+  sorted.forEach((event) => {
+    if (current.length > 0 && event.startAt >= currentEndAt) {
+      groups.push(current);
+      current = [];
+      currentEndAt = -Infinity;
+    }
+    current.push(event);
+    currentEndAt = Math.max(currentEndAt, event.endAt);
+  });
+  if (current.length > 0) groups.push(current);
+
+  return groups.flatMap((group, groupIndex) => {
+    const laneEnds = [];
+    const assigned = group.map((event) => {
+      let laneIndex = laneEnds.findIndex((endAt) => endAt <= event.startAt);
+      if (laneIndex < 0) {
+        laneIndex = laneEnds.length;
+        laneEnds.push(event.endAt);
+      } else {
+        laneEnds[laneIndex] = event.endAt;
+      }
+      return { ...event, laneIndex };
+    });
+    const laneCount = laneEnds.length;
+    const visibleLaneCount = Math.min(3, laneCount);
+    const gapPercent = visibleLaneCount > 1 ? 1.5 : 0;
+    const widthPercent = (100 - gapPercent * (visibleLaneCount - 1)) / visibleLaneCount;
+    const overlapGroupId = `week-overlap-${groupIndex}-${group[0].startAt}-${group.map((event) => String(event.id)).join("-")}`;
+    return assigned.map((event) => ({
+      ...event,
+      laneCount,
+      overlapGroupId,
+      widthPercent,
+      leftPercent: event.laneIndex * (widthPercent + gapPercent),
+    }));
+  });
+}
+
+function weekEventDisplayPriority(item) {
+  if (item?.type === "course") return 0;
+  if (item?.type === "task" && globalThis.DailyPlanner?.isFixedTimeTask?.(item)) return 1;
+  if (item?.type === "planned-focus") return 2;
+  return 3;
+}
+
+function showWeekOverlapSummary(events) {
+  const items = (Array.isArray(events) ? events : [])
+    .slice()
+    .sort((a, b) => Number(a.startAt) - Number(b.startAt)
+      || weekEventDisplayPriority(a) - weekEventDisplayPriority(b)
+      || String(a.id).localeCompare(String(b.id)));
+  if (!items.length) return;
+  eventDetailTaskId = null;
+  els.eventSheetType.textContent = "SCHEDULE";
+  els.eventSheetTitle.textContent = `该时段共有 ${items.length} 项安排`;
+  els.eventSheetMeta.textContent = "";
+  const startAt = Math.min(...items.map((item) => Number(item.startAt)));
+  const endAt = Math.max(...items.map((item) => Number(item.endAt)));
+  const startText = document.createElement("span");
+  const endText = document.createElement("span");
+  const countText = document.createElement("strong");
+  startText.textContent = formatDateTime(startAt);
+  endText.textContent = formatDateTime(endAt);
+  countText.textContent = `${items.length} 项`;
+  els.eventSheetMeta.append(startText, endText, countText);
+  els.eventSheetDescription.textContent = items.map((item) => {
+    const type = item.type === "course"
+      ? "课程"
+      : item.type === "planned-focus" ? "计划专注" : globalThis.DailyPlanner?.isFixedTimeTask?.(item) ? "固定任务" : "任务";
+    return `${formatClock(item.startAt)} ${type} · ${String(item.title || "未命名安排")}`;
+  }).join("\n");
+  if (els.eventSheetDeleteButton) els.eventSheetDeleteButton.hidden = true;
+  els.eventSheet.hidden = false;
+  document.body.classList.add("has-event-sheet");
+}
+
 function renderWeekSchedule() {
   const labels = ["一", "二", "三", "四", "五", "六", "日"];
   const dayStartHour = 7;
@@ -1992,7 +2093,8 @@ function renderWeekSchedule() {
   const end = new Date(start);
   end.setDate(start.getDate() + 6);
   els.weekRangeTitle.textContent = `${formatMonthDay(start)} - ${formatMonthDay(end)}`;
-  els.weekBoard.innerHTML = "";
+  els.weekBoard.replaceChildren();
+  let todayColumn = null;
 
   for (let index = 0; index < 7; index += 1) {
     const day = new Date(start);
@@ -2000,7 +2102,9 @@ function renderWeekSchedule() {
     const key = dateKey(day);
     const column = document.createElement("article");
     column.className = "week-column";
+    column.dataset.dayKey = key;
     column.classList.toggle("is-today", key === dateKey());
+    if (key === dateKey()) todayColumn = column;
     const header = document.createElement("header");
     const headerLabel = document.createElement("span");
     headerLabel.textContent = `周${labels[index]}`;
@@ -2016,7 +2120,25 @@ function renderWeekSchedule() {
       .filter((task) => dateKey(new Date(task.startAt)) === key)
       .map((task) => ({ ...task, type: "task" }));
     const plannedFocus = getAdoptedFocusBlocksForDay(key);
-    const items = [...courses, ...tasks, ...plannedFocus].sort((a, b) => a.startAt - b.startAt);
+    const dayWindowStart = new Date(day.getFullYear(), day.getMonth(), day.getDate(), dayStartHour).getTime();
+    const dayWindowEnd = new Date(day.getFullYear(), day.getMonth(), day.getDate(), dayEndHour).getTime();
+    const calendarDayStart = new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime();
+    const calendarDayEnd = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1).getTime();
+    const items = [...courses, ...tasks, ...plannedFocus]
+      .filter((item) => Number(item.startAt) < calendarDayEnd && Number(item.endAt) > calendarDayStart)
+      .map((item) => {
+        const originalStartAt = Math.max(Number(item.startAt), calendarDayStart);
+        const originalEndAt = Math.min(Number(item.endAt), calendarDayEnd);
+        const duration = Math.max(60000, originalEndAt - originalStartAt);
+        const startAt = originalEndAt <= dayWindowStart
+          ? dayWindowStart
+          : originalStartAt >= dayWindowEnd ? Math.max(dayWindowStart, dayWindowEnd - duration) : Math.max(originalStartAt, dayWindowStart);
+        const endAt = originalEndAt <= dayWindowStart
+          ? Math.min(dayWindowEnd, dayWindowStart + duration)
+          : originalStartAt >= dayWindowEnd ? dayWindowEnd : Math.min(originalEndAt, dayWindowEnd);
+        return { ...item, detailItem: item, startAt, endAt };
+      });
+    const laidOutItems = layoutOverlappingEvents(items);
     column.classList.toggle("is-empty", items.length === 0);
     column.classList.toggle("is-light", items.length === 1);
     column.classList.toggle("is-normal", items.length > 1 && items.length <= 3);
@@ -2028,47 +2150,85 @@ function renderWeekSchedule() {
       empty.textContent = "空";
       list.append(empty);
     } else {
-      items.forEach((item) => {
-        const itemStart = new Date(item.startAt);
-        const itemEnd = new Date(item.endAt);
-        const dayBounds = item.type === "planned-focus" ? getDayBounds(key) : null;
-        const startMinutes = dayBounds
-          ? (item.startAt - dayBounds.startAt) / 60000
-          : itemStart.getHours() * 60 + itemStart.getMinutes();
-        const endMinutes = dayBounds
-          ? (item.endAt - dayBounds.startAt) / 60000
-          : itemEnd.getHours() * 60 + itemEnd.getMinutes();
-        const visibleStart = Math.max(dayStartHour * 60, startMinutes);
-        const visibleEnd = Math.min(dayEndHour * 60, Math.max(endMinutes, startMinutes + 30));
-        const top = (visibleStart - dayStartHour * 60) / totalMinutes * 100;
-        const height = Math.max(6, (visibleEnd - visibleStart) / totalMinutes * 100);
+      const groups = new Map();
+      laidOutItems.forEach((item) => {
+        if (!groups.has(item.overlapGroupId)) groups.set(item.overlapGroupId, []);
+        groups.get(item.overlapGroupId).push(item);
+      });
+      const renderBlock = (item, laneIndex = item.laneIndex, laneCount = item.laneCount) => {
+        const visibleStart = (item.startAt - dayWindowStart) / 60000;
+        const visibleEnd = (item.endAt - dayWindowStart) / 60000;
+        const top = visibleStart / totalMinutes * 100;
+        const height = (visibleEnd - visibleStart) / totalMinutes * 100;
+        const visibleLaneCount = Math.min(3, laneCount);
+        const gapPercent = visibleLaneCount > 1 ? 1.5 : 0;
+        const widthPercent = (100 - gapPercent * (visibleLaneCount - 1)) / visibleLaneCount;
         const block = document.createElement("button");
         block.type = "button";
         block.className = `week-block is-${item.type}`;
+        if (visibleEnd - visibleStart < 30) block.classList.add("is-compact");
         const color = getTaskColor(item.color || (item.type === "course" ? "sky" : "sage"));
         block.style.setProperty("--week-block-bg", color.bg);
         block.style.setProperty("--week-block-border", color.border);
         block.style.setProperty("--week-block-ink", color.ink);
-        block.style.setProperty("--event-top", `${Math.min(94, Math.max(0, top))}%`);
-        block.style.setProperty("--event-height", `${Math.min(100 - Math.min(94, Math.max(0, top)), height)}%`);
+        block.style.setProperty("--event-top", `${Math.min(100, Math.max(0, top))}%`);
+        block.style.setProperty("--event-height", `${Math.max(0.1, Math.min(100 - Math.min(100, Math.max(0, top)), height))}%`);
+        block.style.setProperty("--event-left", `${laneIndex * (widthPercent + gapPercent)}%`);
+        block.style.setProperty("--event-width", `${widthPercent}%`);
+        const detailItem = item.detailItem || item;
         const blockTime = document.createElement("strong");
-        blockTime.textContent = formatClock(item.startAt);
+        blockTime.textContent = formatClock(detailItem.startAt);
         const blockTitle = document.createElement("span");
         blockTitle.textContent = item.title;
         block.append(blockTime, blockTitle);
         if (item.type === "planned-focus") {
           const blockType = document.createElement("small");
-          blockType.textContent = item.orphaned ? "计划专注 · 原任务已删除" : "计划专注";
+          const sprintLabel = item.planningMode === "deadline-sprint" ? " · 冲刺" : "";
+          blockType.textContent = item.orphaned ? `计划专注${sprintLabel} · 原任务已删除` : `计划专注${sprintLabel}`;
           block.append(blockType);
-          block.setAttribute("aria-label", `计划专注 ${item.title}，${formatClock(item.startAt)} 到 ${formatClock(item.endAt)}`);
+          block.setAttribute("aria-label", `计划专注 ${item.title}，${formatClock(detailItem.startAt)} 到 ${formatClock(detailItem.endAt)}`);
         }
-        block.addEventListener("click", () => showEventDetail(item));
+        block.addEventListener("click", () => showEventDetail(detailItem));
         list.append(block);
+      };
+      groups.forEach((group) => {
+        const laneCount = Math.max(...group.map((item) => item.laneCount));
+        if (laneCount <= 3) {
+          group.forEach((item) => renderBlock(item));
+          return;
+        }
+        const prioritized = group.slice().sort((a, b) => weekEventDisplayPriority(a) - weekEventDisplayPriority(b)
+          || a.startAt - b.startAt || a.endAt - b.endAt || String(a.id).localeCompare(String(b.id)));
+        prioritized.slice(0, 2).forEach((item, laneIndex) => renderBlock(item, laneIndex, 3));
+        const hiddenCount = Math.max(1, group.length - 2);
+        const summaryStartAt = Math.min(...group.map((item) => item.startAt));
+        const summaryEndAt = Math.max(...group.map((item) => item.endAt));
+        const visibleStart = (summaryStartAt - dayWindowStart) / 60000;
+        const visibleEnd = (summaryEndAt - dayWindowStart) / 60000;
+        const summaryBlock = document.createElement("button");
+        summaryBlock.type = "button";
+        summaryBlock.className = "week-block is-overlap-summary";
+        summaryBlock.style.setProperty("--event-top", `${visibleStart / totalMinutes * 100}%`);
+        summaryBlock.style.setProperty("--event-height", `${Math.max(0.1, (visibleEnd - visibleStart) / totalMinutes * 100)}%`);
+        summaryBlock.style.setProperty("--event-left", `${2 * ((100 - 3) / 3 + 1.5)}%`);
+        summaryBlock.style.setProperty("--event-width", `${(100 - 3) / 3}%`);
+        const summaryTitle = document.createElement("strong");
+        const summaryHint = document.createElement("span");
+        summaryTitle.textContent = `+${hiddenCount} 项`;
+        summaryHint.textContent = "查看全部";
+        summaryBlock.append(summaryTitle, summaryHint);
+        summaryBlock.setAttribute("aria-label", `${group.length} 项重叠安排，查看全部`);
+        summaryBlock.addEventListener("click", () => showWeekOverlapSummary(group.map((item) => item.detailItem || item)));
+        list.append(summaryBlock);
       });
     }
 
     column.append(list);
     els.weekBoard.append(column);
+  }
+  const mobileWeek = typeof globalThis.matchMedia === "function" && globalThis.matchMedia("(max-width: 560px)").matches;
+  if (mobileWeek && todayColumn && typeof todayColumn.scrollIntoView === "function") {
+    todayColumn.scrollIntoView({ block: "nearest", inline: "center" });
   }
 }
 
@@ -3823,6 +3983,10 @@ function resetDeadlineSprintMemory(clearTask = false) {
   deadlineSprintSelectedIds = new Set();
   deadlineSprintGenerating = false;
   deadlineSprintError = null;
+  deadlineSprintAdopting = false;
+  deadlineSprintAdoptionError = null;
+  deadlineSprintAdoptionNotice = null;
+  deadlineSprintConflictIds = new Set();
   if (clearTask) deadlineSprintTaskId = null;
 }
 
@@ -3926,6 +4090,8 @@ function renderDeadlineSprintCandidates() {
     appendDeadlineSprintEmpty("暂时无法生成冲刺时段", deadlineSprintError, "daily-plan-error");
   } else if (deadlineSprintGenerating) {
     appendDeadlineSprintEmpty("正在寻找截止前的空闲时间…", "所有计算都在本机完成。", "deadline-sprint-loading");
+  } else if (deadlineSprintAdoptionNotice && !deadlineSprintPreview) {
+    appendDeadlineSprintEmpty("冲刺时段已加入日程", "可以在时间轴和周日程中查看已采用的计划专注。", "deadline-sprint-success");
   } else if (!deadlineSprintPreview) {
     appendDeadlineSprintEmpty("选择一个任务开始冲刺", "生成后可以逐个选择想采用的专注时段。");
   } else {
@@ -3944,10 +4110,12 @@ function renderDeadlineSprintCandidates() {
       candidates.forEach((candidate) => {
         const row = document.createElement("label");
         row.className = "deadline-sprint-candidate";
+        if (deadlineSprintConflictIds.has(String(candidate.id))) row.classList.add("is-conflict");
         const checkbox = document.createElement("input");
         checkbox.type = "checkbox";
         checkbox.value = String(candidate.id);
         checkbox.checked = deadlineSprintSelectedIds.has(String(candidate.id));
+        checkbox.disabled = deadlineSprintAdopting;
         checkbox.setAttribute("aria-label", `选择第 ${candidate.sequence} 轮，${deadlineSprintDateTime(candidate.startAt)}`);
         checkbox.addEventListener("change", () => toggleDeadlineSprintCandidate(candidate.id, checkbox.checked));
         const copy = document.createElement("span");
@@ -3966,6 +4134,9 @@ function renderDeadlineSprintCandidates() {
       appendDeadlineSprintEmpty("没有可用的冲刺时段", "可以调整固定安排，或选择其他截止任务。");
     }
     appendDeadlineSprintWarnings(deadlineSprintPreview.warnings);
+    if (deadlineSprintAdoptionError) {
+      appendDeadlineSprintEmpty("暂时无法采用冲刺时段", deadlineSprintAdoptionError, "daily-plan-error");
+    }
   }
 
   const stats = deadlineSprintSelectionStats();
@@ -3984,8 +4155,16 @@ function renderDeadlineSprintCandidates() {
     }
   }
   if (els.deadlineSprintAdoptButton) {
-    els.deadlineSprintAdoptButton.disabled = true;
-    els.deadlineSprintAdoptButton.setAttribute("aria-disabled", "true");
+    const canAdopt = Boolean(deadlineSprintPreview) && stats.count > 0 && !deadlineSprintGenerating && !deadlineSprintAdopting;
+    els.deadlineSprintAdoptButton.disabled = !canAdopt;
+    els.deadlineSprintAdoptButton.setAttribute("aria-disabled", String(!canAdopt));
+    els.deadlineSprintAdoptButton.setAttribute("aria-busy", String(deadlineSprintAdopting));
+    els.deadlineSprintAdoptButton.textContent = deadlineSprintAdopting ? "保存中…" : "采用到日程";
+  }
+  if (els.deadlineSprintAdoptionMessage) {
+    const message = deadlineSprintAdoptionError || deadlineSprintAdoptionNotice || "";
+    els.deadlineSprintAdoptionMessage.hidden = !message;
+    els.deadlineSprintAdoptionMessage.textContent = message;
   }
 }
 
@@ -4013,21 +4192,25 @@ function renderDeadlineSprintInterface(now = Date.now()) {
     els.deadlineSprintTaskSelect.append(option);
   });
   els.deadlineSprintTaskSelect.value = deadlineSprintTaskId || "";
-  els.deadlineSprintTaskSelect.disabled = deadlineSprintGenerating || eligible.length === 0;
+  els.deadlineSprintTaskSelect.disabled = deadlineSprintGenerating || deadlineSprintAdopting || eligible.length === 0;
 
   const active = eligible.find(({ task }) => String(task.id) === String(deadlineSprintTaskId));
   els.deadlineSprintTaskMeta.textContent = active
     ? `${String(active.task.title || "未命名任务")} · ${deadlineSprintDateTime(active.deadlineAt)} 截止 · 剩余 ${deadlineSprintRemainingText(active.deadlineAt, timestamp)}`
     : eligible.length === 0 ? "当前没有未完成且具有未来截止时间的任务。" : "先选择一个任务，再生成候选冲刺时段。";
-  els.deadlineSprintGenerateButton.disabled = !active || deadlineSprintGenerating;
+  els.deadlineSprintGenerateButton.disabled = !active || deadlineSprintGenerating || deadlineSprintAdopting;
   els.deadlineSprintGenerateButton.setAttribute("aria-disabled", String(els.deadlineSprintGenerateButton.disabled));
   els.deadlineSprintGenerateButton.textContent = deadlineSprintGenerating ? "生成中…" : deadlineSprintPreview ? "重新生成冲刺时段" : "生成冲刺时段";
-  els.dailyPlanCard?.setAttribute("aria-busy", String(deadlineSprintGenerating));
-  els.dailyPlanCard?.classList.toggle("is-loading", deadlineSprintGenerating);
-  els.dailyPlanCard?.classList.toggle("is-error", Boolean(deadlineSprintError));
+  els.dailyPlanCard?.setAttribute("aria-busy", String(deadlineSprintGenerating || deadlineSprintAdopting));
+  els.dailyPlanCard?.classList.toggle("is-loading", deadlineSprintGenerating || deadlineSprintAdopting);
+  els.dailyPlanCard?.classList.toggle("is-error", Boolean(deadlineSprintError || deadlineSprintAdoptionError));
   if (dailyPlanMode === "deadline-sprint" && els.dailyPlanStatus) {
-    els.dailyPlanStatus.textContent = deadlineSprintGenerating
+    els.dailyPlanStatus.textContent = deadlineSprintAdopting
+      ? "保存中"
+      : deadlineSprintGenerating
       ? "生成中"
+      : deadlineSprintAdoptionError ? "采用失败"
+      : deadlineSprintAdoptionNotice ? "已加入日程"
       : deadlineSprintError ? "生成失败" : deadlineSprintPreview ? "候选已生成" : "尚未生成";
   }
   renderDeadlineSprintCandidates();
@@ -4061,27 +4244,36 @@ function selectDeadlineSprintTask(taskId, now = Date.now()) {
   deadlineSprintPreview = null;
   deadlineSprintSelectedIds = new Set();
   deadlineSprintError = null;
+  deadlineSprintAdoptionError = null;
+  deadlineSprintAdoptionNotice = null;
+  deadlineSprintConflictIds = new Set();
   renderDeadlineSprintInterface(now);
 }
 
 function toggleDeadlineSprintCandidate(candidateId, selected) {
   const id = String(candidateId || "");
+  if (deadlineSprintAdopting) return false;
   const exists = Array.isArray(deadlineSprintPreview?.candidates)
     && deadlineSprintPreview.candidates.some((candidate) => String(candidate.id) === id);
   if (!exists) return false;
   if (selected) deadlineSprintSelectedIds.add(id);
   else deadlineSprintSelectedIds.delete(id);
+  deadlineSprintConflictIds.delete(id);
+  deadlineSprintAdoptionError = null;
   renderDeadlineSprintCandidates();
   return true;
 }
 
 async function generateDeadlineSprintPreview(now) {
   const timestamp = Number(now);
-  if (deadlineSprintGenerating || dailyPlanGenerating || dailyPlanAdopting) return false;
+  if (deadlineSprintGenerating || deadlineSprintAdopting || dailyPlanGenerating || dailyPlanAdopting) return false;
   deadlineSprintGenerating = true;
   deadlineSprintPreview = null;
   deadlineSprintSelectedIds = new Set();
   deadlineSprintError = null;
+  deadlineSprintAdoptionError = null;
+  deadlineSprintAdoptionNotice = null;
+  deadlineSprintConflictIds = new Set();
   if (els.deadlineSprintTaskSelect) els.deadlineSprintTaskSelect.disabled = true;
   if (els.deadlineSprintGenerateButton) {
     els.deadlineSprintGenerateButton.disabled = true;
@@ -4111,6 +4303,295 @@ async function generateDeadlineSprintPreview(now) {
   }
 }
 
+function deadlineSprintIntervalsOverlap(left, right) {
+  return Number(left?.startAt) < Number(right?.endAt) && Number(left?.endAt) > Number(right?.startAt);
+}
+
+function deadlineSprintBlockMatchesCandidate(block, candidate) {
+  return String(block?.id || "") === String(candidate?.id || "")
+    && String(block?.taskId || "") === String(candidate?.taskId || "")
+    && Number(block?.startAt) === Number(candidate?.startAt)
+    && Number(block?.endAt) === Number(candidate?.endAt)
+    && Number(block?.minutes) === Number(candidate?.minutes)
+    && normalizeDailyPlanBlockMode(block?.planningMode) === "deadline-sprint"
+    && String(block?.sprintId || "") === String(candidate?.sprintId || "")
+    && Number(block?.deadlineAt) === Number(candidate?.deadlineAt)
+    && Number(block?.sequence) === Number(candidate?.sequence);
+}
+
+function getCurrentAdoptedDailyPlanBlocks() {
+  const blocks = [];
+  Object.keys(state.dailyPlans && typeof state.dailyPlans === "object" && !Array.isArray(state.dailyPlans) ? state.dailyPlans : {})
+    .sort()
+    .forEach((dayKeyValue) => {
+      const plan = getAdoptedDailyPlan(dayKeyValue);
+      if (!plan) return;
+      plan.blocks.forEach((block) => blocks.push({ ...block, planDayKey: dayKeyValue }));
+    });
+  return blocks;
+}
+
+function validateDeadlineSprintSelection(now) {
+  const timestamp = Number(now);
+  const preview = deadlineSprintPreview;
+  const candidates = Array.isArray(preview?.candidates) ? preview.candidates : [];
+  const candidateById = new Map(candidates.map((candidate) => [String(candidate?.id || ""), candidate]));
+  const selected = [...deadlineSprintSelectedIds]
+    .map((id) => candidateById.get(String(id)))
+    .filter(Boolean);
+  const conflictIds = new Set();
+  const duplicateIds = new Set();
+  if (!Number.isFinite(timestamp) || !preview || selected.length === 0) {
+    return { ok: false, reason: "no-selection", selected: [], conflictIds, duplicateIds };
+  }
+
+  const taskId = String(preview.taskId || "");
+  const task = (Array.isArray(state.tasks) ? state.tasks : [])
+    .find((item) => String(item?.id || "") === taskId);
+  const planner = globalThis.DailyPlanner;
+  const currentDeadlineAt = task && task.done !== true && planner && typeof planner.getTaskDeadlineAt === "function"
+    ? planner.getTaskDeadlineAt(task, timestamp)
+    : null;
+  if (!task || task.done === true || !Number.isFinite(currentDeadlineAt)
+    || Number(currentDeadlineAt) !== Number(preview.deadlineAt)) {
+    selected.forEach((candidate) => conflictIds.add(String(candidate.id)));
+    return { ok: false, reason: "task-changed", selected, conflictIds, duplicateIds };
+  }
+
+  const adoptedBlocks = getCurrentAdoptedDailyPlanBlocks();
+  const adoptedById = new Map(adoptedBlocks.map((block) => [String(block.id), block]));
+  const courses = Array.isArray(state.courses) ? state.courses : [];
+  const breakMinutes = Math.max(0, Number(preview.breakMinutes) || 0);
+  const fixedTasks = (Array.isArray(state.tasks) ? state.tasks : [])
+    .filter((item) => item && item.done !== true && planner.isFixedTimeTask(item));
+  selected.forEach((candidate) => {
+    const id = String(candidate?.id || "");
+    const startAt = Number(candidate?.startAt);
+    const endAt = Number(candidate?.endAt);
+    const minutes = Number(candidate?.minutes);
+    const internallyValid = id
+      && String(candidate?.taskId || "") === taskId
+      && String(candidate?.sprintId || "") === String(preview.sprintId || "")
+      && Number(candidate?.deadlineAt) === Number(preview.deadlineAt)
+      && Number.isFinite(startAt) && Number.isFinite(endAt) && endAt > startAt
+      && Number.isFinite(minutes) && minutes > 0
+      && minutes === Math.round((endAt - startAt) / 60000)
+      && Number.isFinite(Number(candidate?.sequence)) && Number(candidate.sequence) > 0
+      && startAt > timestamp && endAt <= currentDeadlineAt;
+    if (!internallyValid) {
+      conflictIds.add(id);
+      return;
+    }
+    const sameIdBlock = adoptedById.get(id);
+    if (sameIdBlock) {
+      if (deadlineSprintBlockMatchesCandidate(sameIdBlock, candidate)) duplicateIds.add(id);
+      else conflictIds.add(id);
+      return;
+    }
+    const conflictsWithAdopted = adoptedBlocks.some((block) => {
+      if (deadlineSprintIntervalsOverlap(candidate, block)) return true;
+      if (String(block.planningMode) !== "deadline-sprint" || String(block.sprintId) !== String(candidate.sprintId)) return false;
+      const gap = Math.max(Number(candidate.startAt), Number(block.startAt))
+        - Math.min(Number(candidate.endAt), Number(block.endAt));
+      return gap < breakMinutes * 60000;
+    });
+    if (courses.some((course) => deadlineSprintIntervalsOverlap(candidate, course))
+      || fixedTasks.some((fixedTask) => deadlineSprintIntervalsOverlap(candidate, fixedTask))
+      || conflictsWithAdopted) {
+      conflictIds.add(id);
+    }
+  });
+
+  const selectedNew = selected
+    .filter((candidate) => !duplicateIds.has(String(candidate.id)) && !conflictIds.has(String(candidate.id)))
+    .sort((a, b) => Number(a.startAt) - Number(b.startAt) || Number(a.endAt) - Number(b.endAt) || String(a.id).localeCompare(String(b.id)));
+  for (let index = 1; index < selectedNew.length; index += 1) {
+    const previous = selectedNew[index - 1];
+    const current = selectedNew[index];
+    if (deadlineSprintIntervalsOverlap(previous, current)
+      || (String(previous.sprintId) === String(current.sprintId)
+        && Number(current.startAt) - Number(previous.endAt) < breakMinutes * 60000)) {
+      conflictIds.add(String(previous.id));
+      conflictIds.add(String(current.id));
+    }
+  }
+  return {
+    ok: conflictIds.size === 0,
+    reason: conflictIds.size ? "schedule-changed" : null,
+    selected,
+    conflictIds,
+    duplicateIds,
+  };
+}
+
+function cloneDailyPlanValue(value) {
+  return typeof structuredClone === "function" ? structuredClone(value) : JSON.parse(JSON.stringify(value));
+}
+
+function deadlineSprintPlanWindow(dayKeyValue, blocks, existingWindow = null) {
+  const bounds = getDayBounds(dayKeyValue);
+  if (!bounds) return null;
+  const dayStart = new Date(bounds.startAt);
+  const defaultStartAt = new Date(dayStart.getFullYear(), dayStart.getMonth(), dayStart.getDate(), 7).getTime();
+  const defaultEndAt = new Date(dayStart.getFullYear(), dayStart.getMonth(), dayStart.getDate(), 22).getTime();
+  const blockStartAt = Math.min(...blocks.map((block) => Number(block.startAt)));
+  const blockEndAt = Math.max(...blocks.map((block) => Number(block.endAt)));
+  const oldStartAt = Number(existingWindow?.startAt);
+  const oldEndAt = Number(existingWindow?.endAt);
+  const oldPlanningStartAt = Number(existingWindow?.planningStartAt);
+  const hasExisting = Number.isFinite(oldStartAt) && Number.isFinite(oldEndAt) && oldEndAt > oldStartAt
+    && Number.isFinite(oldPlanningStartAt);
+  return {
+    startAt: hasExisting ? Math.min(oldStartAt, blockStartAt) : defaultStartAt,
+    endAt: hasExisting ? Math.max(oldEndAt, blockEndAt) : defaultEndAt,
+    planningStartAt: hasExisting ? Math.min(oldPlanningStartAt, blockStartAt) : blockStartAt,
+  };
+}
+
+function mergeDeadlineSprintBlocksIntoPlans(validation, adoptedAt) {
+  const timestamp = Number(adoptedAt);
+  const preview = deadlineSprintPreview;
+  if (!validation?.ok || !Number.isFinite(timestamp) || !preview) return { ok: false, changed: false };
+  const selectedNew = validation.selected.filter((candidate) => !validation.duplicateIds.has(String(candidate.id)));
+  if (selectedNew.length === 0) return { ok: true, changed: false, plans: state.dailyPlans };
+  const grouped = new Map();
+  selectedNew.forEach((candidate) => {
+    const dayKeyValue = dailyPlanDayKey(candidate.startAt);
+    if (!grouped.has(dayKeyValue)) grouped.set(dayKeyValue, []);
+    grouped.get(dayKeyValue).push(candidate);
+  });
+  const nextPlans = { ...(state.dailyPlans && typeof state.dailyPlans === "object" ? state.dailyPlans : {}) };
+  grouped.forEach((candidates, dayKeyValue) => {
+    const existing = getAdoptedDailyPlan(dayKeyValue);
+    const existingBlocks = existing ? existing.blocks.map(cloneDailyPlanValue) : [];
+    const byId = new Map(existingBlocks.map((block) => [String(block.id), block]));
+    candidates.forEach((candidate) => {
+      if (byId.has(String(candidate.id))) return;
+      byId.set(String(candidate.id), {
+        id: String(candidate.id),
+        taskId: String(candidate.taskId),
+        title: String(candidate.title || preview.title || "冲刺任务"),
+        startAt: Number(candidate.startAt),
+        endAt: Number(candidate.endAt),
+        minutes: Number(candidate.minutes),
+        planningMode: "deadline-sprint",
+        sprintId: String(candidate.sprintId),
+        deadlineAt: Number(candidate.deadlineAt),
+        sequence: Number(candidate.sequence),
+      });
+    });
+    const blocks = [...byId.values()]
+      .sort((a, b) => Number(a.startAt) - Number(b.startAt) || Number(a.endAt) - Number(b.endAt) || String(a.id).localeCompare(String(b.id)));
+    const priorities = [];
+    const priorityTaskIds = new Set();
+    (existing?.priorities || []).forEach((priority) => {
+      const id = priority?.taskId === null || priority?.taskId === undefined ? "" : String(priority.taskId);
+      if (id && priorityTaskIds.has(id)) return;
+      if (id) priorityTaskIds.add(id);
+      priorities.push(cloneDailyPlanValue(priority));
+    });
+    if (!priorityTaskIds.has(String(preview.taskId))) {
+      if (priorities.length >= 5) priorities.length = 4;
+      priorities.push({
+        rank: priorities.length + 1,
+        taskId: String(preview.taskId),
+        title: String(preview.title || "冲刺任务"),
+        startAt: null,
+        deadlineAt: Number(preview.deadlineAt),
+        overdue: false,
+        reasons: ["截止前冲刺"],
+        planningMode: "deadline-sprint",
+      });
+    }
+    const warnings = [];
+    const warningKeys = new Set();
+    (existing?.warnings || []).forEach((warning) => {
+      const key = `${String(warning.code)}:${(warning.sourceIds || []).map(String).sort().join(",")}:${String(warning.message)}`;
+      if (warningKeys.has(key)) return;
+      warningKeys.add(key);
+      warnings.push(cloneDailyPlanValue(warning));
+    });
+    const window = deadlineSprintPlanWindow(dayKeyValue, blocks, existing?.window);
+    nextPlans[dayKeyValue] = {
+      version: 2,
+      mode: dailyPlanModeFromBlocks(blocks),
+      dayKey: dayKeyValue,
+      generated_at: existing ? existing.generated_at : Number(preview.generated_at),
+      adopted_at: timestamp,
+      window,
+      focusTargetMinutes: existing ? existing.focusTargetMinutes : Number(preview.focusMinutes),
+      priorities: priorities.slice(0, 5),
+      blocks,
+      warnings,
+    };
+  });
+  return { ok: true, changed: true, plans: nextPlans, dayKeys: [...grouped.keys()].sort() };
+}
+
+async function adoptDeadlineSprintSelection(adoptedAt) {
+  const timestamp = Number(adoptedAt);
+  if (deadlineSprintAdopting || deadlineSprintGenerating || dailyPlanAdopting || dailyPlanGenerating
+    || !Number.isFinite(timestamp) || deadlineSprintSelectedIds.size === 0) return false;
+  deadlineSprintAdopting = true;
+  deadlineSprintAdoptionError = null;
+  deadlineSprintAdoptionNotice = null;
+  deadlineSprintConflictIds = new Set();
+  renderDeadlineSprintCandidates();
+  if (els.dailyPlanCard) els.dailyPlanCard.setAttribute("aria-busy", "true");
+  if (els.dailyPlanStatus) els.dailyPlanStatus.textContent = "保存中";
+  await Promise.resolve();
+  try {
+    const validation = validateDeadlineSprintSelection(timestamp);
+    if (!validation.ok) {
+      deadlineSprintConflictIds = validation.conflictIds;
+      validation.conflictIds.forEach((id) => deadlineSprintSelectedIds.delete(String(id)));
+      deadlineSprintAdoptionError = validation.reason === "no-selection"
+        ? "请先选择至少一个冲刺时段"
+        : "部分时段已发生变化，请重新确认或重新生成";
+      return false;
+    }
+    const merged = mergeDeadlineSprintBlocksIntoPlans(validation, timestamp);
+    if (!merged.ok) {
+      deadlineSprintAdoptionError = "保存失败，请稍后重试";
+      return false;
+    }
+    if (merged.changed) {
+      const previousDailyPlans = state.dailyPlans;
+      const previousSyncUpdatedAt = state.syncUpdatedAt;
+      const previousAffectedPlans = Object.fromEntries((merged.dayKeys || []).map((dayKeyValue) => [
+        dayKeyValue,
+        Object.prototype.hasOwnProperty.call(previousDailyPlans, dayKeyValue)
+          ? cloneDailyPlanValue(previousDailyPlans[dayKeyValue])
+          : undefined,
+      ]));
+      try {
+        state.dailyPlans = merged.plans;
+        const result = saveState();
+        if (result === false) throw new Error("saveState returned false");
+      } catch (error) {
+        console.error("Deadline sprint adoption failed:", error);
+        const restoredPlans = { ...previousDailyPlans };
+        Object.entries(previousAffectedPlans).forEach(([dayKeyValue, plan]) => {
+          if (plan === undefined) delete restoredPlans[dayKeyValue];
+          else restoredPlans[dayKeyValue] = plan;
+        });
+        state.dailyPlans = restoredPlans;
+        state.syncUpdatedAt = previousSyncUpdatedAt;
+        deadlineSprintAdoptionError = "保存失败，请稍后重试";
+        return false;
+      }
+    }
+    resetDeadlineSprintMemory(true);
+    deadlineSprintAdoptionNotice = "冲刺时段已加入日程";
+    if (typeof renderTimeline === "function") renderTimeline();
+    if (typeof renderWeekSchedule === "function") renderWeekSchedule();
+    return true;
+  } finally {
+    deadlineSprintAdopting = false;
+    renderDeadlineSprintInterface(timestamp);
+  }
+}
+
 function dailyPlanClock(timestamp) {
   const value = new Date(timestamp);
   return `${String(value.getHours()).padStart(2, "0")}:${String(value.getMinutes()).padStart(2, "0")}`;
@@ -4124,19 +4605,37 @@ function dailyPlanDayKey(timestamp = Date.now()) {
   return `${year}-${month}-${day}`;
 }
 
+function normalizeDailyPlanBlockMode(value) {
+  return String(value || "").toLowerCase() === "deadline-sprint" ? "deadline-sprint" : "balanced";
+}
+
+function dailyPlanModeFromBlocks(blocks) {
+  const modes = new Set((Array.isArray(blocks) ? blocks : []).map((block) => normalizeDailyPlanBlockMode(block?.planningMode)));
+  if (modes.has("deadline-sprint") && modes.has("balanced")) return "mixed";
+  if (modes.has("deadline-sprint")) return "deadline-sprint";
+  return "balanced";
+}
+
 function normalizeDailyPlanForDisplay(plan, expectedDayKey = null, requireAdopted = false) {
   if (!plan || typeof plan !== "object" || Array.isArray(plan)) return null;
+  const version = Number(plan.version) === 2 ? 2 : 1;
   const dayKeyValue = typeof plan.dayKey === "string" ? plan.dayKey : "";
   const generatedAt = Number(plan.generated_at);
   const adoptedAt = Number(plan.adopted_at);
   if (!dayKeyValue || (expectedDayKey && dayKeyValue !== expectedDayKey) || !Number.isFinite(generatedAt)) return null;
   if (requireAdopted && !Number.isFinite(adoptedAt)) return null;
   if (!plan.window || typeof plan.window !== "object" || Array.isArray(plan.window)) return null;
+  const windowStartAt = Number(plan.window.startAt);
+  const windowEndAt = Number(plan.window.endAt);
+  const planningStartAt = Number(plan.window.planningStartAt);
+  if (!Number.isFinite(windowStartAt) || !Number.isFinite(windowEndAt) || windowEndAt <= windowStartAt
+    || !Number.isFinite(planningStartAt)) return null;
   const focusTargetMinutes = Number(plan.focusTargetMinutes);
   if (!Number.isFinite(focusTargetMinutes) || focusTargetMinutes <= 0) return null;
+  const priorityLimit = version === 2 ? 5 : 3;
   const priorities = Array.isArray(plan.priorities) ? plan.priorities
     .filter((priority) => priority && typeof priority === "object")
-    .slice(0, 3)
+    .slice(0, priorityLimit)
     .map((priority, index) => ({
       rank: Number(priority.rank) || index + 1,
       taskId: priority.taskId === null || priority.taskId === undefined ? null : String(priority.taskId),
@@ -4145,21 +4644,39 @@ function normalizeDailyPlanForDisplay(plan, expectedDayKey = null, requireAdopte
       deadlineAt: Number.isFinite(Number(priority.deadlineAt)) ? Number(priority.deadlineAt) : null,
       overdue: Boolean(priority.overdue),
       reasons: Array.isArray(priority.reasons) ? priority.reasons.map(String) : [],
+      planningMode: normalizeDailyPlanBlockMode(priority.planningMode),
     })) : [];
-  const blocks = Array.isArray(plan.blocks) ? plan.blocks
+  const rawBlocks = Array.isArray(plan.blocks) ? plan.blocks
     .filter((block) => block && typeof block === "object"
+      && String(block.id || "").trim()
+      && block.taskId !== null && block.taskId !== undefined && String(block.taskId).trim()
       && Number.isFinite(Number(block.startAt))
       && Number.isFinite(Number(block.endAt))
-      && Number(block.endAt) > Number(block.startAt))
-    .slice(0, 3)
+      && Number(block.endAt) > Number(block.startAt)
+      && Number.isFinite(Number(block.minutes))
+      && Number(block.minutes) > 0
+      && (String(block.planningMode || "").toLowerCase() !== "deadline-sprint"
+        || (String(block.sprintId || "").trim()
+          && Number.isFinite(Number(block.deadlineAt))
+          && Number.isFinite(Number(block.sequence))
+          && Number(block.sequence) > 0)))
+    : [];
+  const blocks = rawBlocks
+    .slice(0, version === 2 ? rawBlocks.length : 3)
     .map((block) => ({
-      id: String(block.id || ""),
-      taskId: block.taskId === null || block.taskId === undefined ? null : String(block.taskId),
+      id: String(block.id),
+      taskId: String(block.taskId),
       title: String(block.title || "专注时段"),
       startAt: Number(block.startAt),
       endAt: Number(block.endAt),
-      minutes: Math.max(0, Number(block.minutes) || 0),
-    })) : [];
+      minutes: Number(block.minutes),
+      planningMode: normalizeDailyPlanBlockMode(block.planningMode),
+      ...(String(block.planningMode || "").toLowerCase() === "deadline-sprint" ? {
+        sprintId: String(block.sprintId || ""),
+        deadlineAt: Number(block.deadlineAt),
+        sequence: Number(block.sequence),
+      } : {}),
+    }));
   const warnings = Array.isArray(plan.warnings) ? plan.warnings
     .filter((warning) => warning && typeof warning === "object")
     .map((warning) => ({
@@ -4169,14 +4686,15 @@ function normalizeDailyPlanForDisplay(plan, expectedDayKey = null, requireAdopte
       sourceIds: Array.isArray(warning.sourceIds) ? warning.sourceIds.map(String) : [],
     })) : [];
   return {
-    version: Number(plan.version) || 1,
+    version,
+    mode: version === 2 ? dailyPlanModeFromBlocks(blocks) : "balanced",
     dayKey: dayKeyValue,
     generated_at: generatedAt,
     ...(Number.isFinite(adoptedAt) ? { adopted_at: adoptedAt } : {}),
     window: {
-      startAt: Number(plan.window.startAt),
-      endAt: Number(plan.window.endAt),
-      planningStartAt: Number(plan.window.planningStartAt),
+      startAt: windowStartAt,
+      endAt: windowEndAt,
+      planningStartAt,
     },
     focusTargetMinutes,
     priorities,
@@ -4247,6 +4765,8 @@ function getAdoptedFocusBlocksForDay(dayKeyValue) {
         originalEndAt: block.endAt,
         planDayKey: plan.dayKey,
         type: "planned-focus",
+        planningMode: block.planningMode,
+        sprintId: block.sprintId || "",
         color: "lavender",
         orphaned: !activeTaskIds.has(taskId),
       });
@@ -4264,6 +4784,7 @@ function createAdoptedDailyPlan(preview, adoptedAt) {
     ...normalized,
     adopted_at: timestamp,
   };
+  if (completePlan.version !== 2) delete completePlan.mode;
   return typeof structuredClone === "function"
     ? structuredClone(completePlan)
     : JSON.parse(JSON.stringify(completePlan));
@@ -4782,6 +5303,7 @@ els.dailyPlanBalancedModeButton?.addEventListener("click", () => setDailyPlanMod
 els.dailyPlanSprintModeButton?.addEventListener("click", () => setDailyPlanMode("deadline-sprint", Date.now()));
 els.deadlineSprintTaskSelect?.addEventListener("change", () => selectDeadlineSprintTask(els.deadlineSprintTaskSelect.value, Date.now()));
 els.deadlineSprintGenerateButton?.addEventListener("click", () => generateDeadlineSprintPreview(Date.now()));
+els.deadlineSprintAdoptButton?.addEventListener("click", () => adoptDeadlineSprintSelection(Date.now()));
 els.resetButton.addEventListener("click", resetTimer);
 els.fastFinishButton.addEventListener("click", fastFinishSession);
 els.plant.addEventListener("click", toggleFlower);
