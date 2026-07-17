@@ -7,6 +7,8 @@
 
   const SESSION_STATUSES = new Set(["running", "completed", "cancelled"]);
   const END_REASONS = new Set(["manual", "switched", "cancelled", "recovered"]);
+  const SESSION_TYPES = new Set(["task", "habit"]);
+  const HABIT_METRIC_TYPES = new Set(["count", "duration"]);
 
   function timestamp(value) {
     const result = value instanceof Date ? value.getTime() : Number(value);
@@ -36,6 +38,9 @@
       session.id,
       session.type,
       session.taskId,
+      session.habitId,
+      session.habitMetricType,
+      session.habitValue,
       session.title,
       session.color,
       session.startAt,
@@ -64,9 +69,11 @@
     void now;
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
     const id = stableId(raw.id);
+    const type = SESSION_TYPES.has(raw.type) ? raw.type : (stableId(raw.habitId) ? "habit" : "task");
     const taskId = stableId(raw.taskId);
-    if (!id || !taskId) return null;
-    if (raw.type !== undefined && raw.type !== "task") return null;
+    const habitId = stableId(raw.habitId);
+    const habitMetricType = HABIT_METRIC_TYPES.has(raw.habitMetricType) ? raw.habitMetricType : null;
+    if (!id || (type === "task" ? !taskId : !habitId || !habitMetricType)) return null;
 
     const startAt = timestamp(raw.startAt);
     if (!Number.isFinite(startAt)) return null;
@@ -107,8 +114,8 @@
 
     return {
       id,
-      type: "task",
-      taskId,
+      type,
+      taskId: type === "task" ? taskId : null,
       title: stableString(raw.title, "未命名任务"),
       color: stableString(raw.color, "sage") || "sage",
       startAt,
@@ -120,6 +127,15 @@
       focusSessionId: stableId(raw.focusSessionId),
       createdAt,
       updatedAt,
+      ...(type === "habit" ? {
+        habitId,
+        habitMetricType,
+        habitValue: status === "completed"
+          ? habitMetricType === "duration"
+            ? calculateMinutes(startAt, endAt)
+            : Number.isFinite(Number(raw.habitValue)) && Number(raw.habitValue) >= 0 ? Number(raw.habitValue) : 1
+          : status === "running" && habitMetricType === "count" ? 1 : 0,
+      } : {}),
     };
   }
 
@@ -152,6 +168,7 @@
         minutes: 0,
         status: "cancelled",
         endReason: "recovered",
+        ...(session.type === "habit" ? { habitValue: 0 } : {}),
       };
     }).sort(stableSessionSort);
   }
@@ -204,6 +221,18 @@
     }
   }
 
+  function validateHabit(habit) {
+    if (!habit || typeof habit !== "object" || Array.isArray(habit)) return null;
+    const habitId = stableId(habit.id);
+    if (!habitId || !HABIT_METRIC_TYPES.has(habit.metricType) || (habit.archivedAt !== null && habit.archivedAt !== undefined)) return null;
+    return {
+      habitId,
+      habitMetricType: habit.metricType,
+      title: stableString(habit.title, "未命名习惯"),
+      color: stableString(habit.color, "sage") || "sage",
+    };
+  }
+
   function startTaskActivity(input = {}) {
     const now = timestamp(input.now);
     const sessions = normalizeActivitySessions(input.sessions, input.now);
@@ -224,6 +253,45 @@
       taskId: task.taskId,
       title: task.title,
       color: task.color,
+      startAt: now,
+      endAt: null,
+      minutes: 0,
+      status: "running",
+      endReason: null,
+      note: "",
+      focusSessionId: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    return {
+      ok: true,
+      changed: true,
+      reason: null,
+      sessions: [...sessions, session].sort(stableSessionSort),
+      activeActivitySessionId: id,
+      session: { ...session },
+    };
+  }
+
+  function startHabitActivity(input = {}) {
+    const now = timestamp(input.now);
+    const sessions = normalizeActivitySessions(input.sessions, input.now);
+    const activeActivitySessionId = repairActiveActivitySessionId(sessions, input.activeActivitySessionId);
+    if (!Number.isFinite(now)) return unchangedResult(sessions, activeActivitySessionId, "INVALID_TIME");
+    const habit = validateHabit(input.habit);
+    if (!habit) return unchangedResult(sessions, activeActivitySessionId, "INVALID_HABIT");
+    if (getRunningActivitySession(sessions, activeActivitySessionId)) return unchangedResult(sessions, activeActivitySessionId, "ALREADY_RUNNING");
+    const id = createSessionId(input.idFactory, input.habit, now);
+    if (!id || sessions.some((session) => session.id === id)) return unchangedResult(sessions, activeActivitySessionId, "INVALID_ID");
+    const session = {
+      id,
+      type: "habit",
+      taskId: null,
+      habitId: habit.habitId,
+      habitMetricType: habit.habitMetricType,
+      habitValue: habit.habitMetricType === "count" ? 1 : 0,
+      title: habit.title,
+      color: habit.color,
       startAt: now,
       endAt: null,
       minutes: 0,
@@ -265,6 +333,11 @@
       endReason: requestedReason,
       updatedAt: Math.max(running.updatedAt, now),
     };
+    if (completed.type === "habit") {
+      completed.habitValue = completed.habitMetricType === "duration"
+        ? completed.minutes
+        : Math.max(0, Number(completed.habitValue) || 1);
+    }
     return {
       ok: true,
       changed: true,
@@ -294,6 +367,7 @@
       endReason,
       updatedAt: Math.max(running.updatedAt, now),
     };
+    if (cancelled.type === "habit") cancelled.habitValue = 0;
     return {
       ok: true,
       changed: true,
@@ -349,6 +423,31 @@
     };
   }
 
+  function switchHabitActivity(input = {}) {
+    const now = timestamp(input.now);
+    const sessions = normalizeActivitySessions(input.sessions, input.now);
+    const activeActivitySessionId = repairActiveActivitySessionId(sessions, input.activeActivitySessionId);
+    if (!Number.isFinite(now)) return unchangedResult(sessions, activeActivitySessionId, "INVALID_TIME");
+    const habit = validateHabit(input.habit);
+    if (!habit) return unchangedResult(sessions, activeActivitySessionId, "INVALID_HABIT");
+    const id = createSessionId(input.idFactory, input.habit, now);
+    if (!id || sessions.some((session) => session.id === id)) return unchangedResult(sessions, activeActivitySessionId, "INVALID_ID");
+    const running = getRunningActivitySession(sessions, activeActivitySessionId);
+    let nextSessions = sessions;
+    let previousSession = null;
+    let shortSession = false;
+    if (running) {
+      const completed = completeActivitySession({ sessions, activeActivitySessionId, now, endReason: "switched" });
+      if (!completed.ok) return completed;
+      nextSessions = completed.sessions;
+      previousSession = completed.session;
+      shortSession = completed.shortSession;
+    }
+    const started = startHabitActivity({ sessions: nextSessions, activeActivitySessionId: null, habit: input.habit, now, idFactory: () => id });
+    if (!started.ok) return unchangedResult(sessions, activeActivitySessionId, started.reason);
+    return { ...started, switched: Boolean(running), previousSession, shortSession };
+  }
+
   function mergeActivitySessions(localSessions, remoteSessions) {
     const local = normalizeActivitySessions(localSessions, 0);
     const remote = normalizeActivitySessions(remoteSessions, 0);
@@ -365,9 +464,11 @@
     repairActiveActivitySessionId,
     getRunningActivitySession,
     startTaskActivity,
+    startHabitActivity,
     completeActivitySession,
     cancelActivitySession,
     switchTaskActivity,
+    switchHabitActivity,
     mergeActivitySessions,
   };
 });

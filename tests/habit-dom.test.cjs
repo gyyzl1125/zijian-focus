@@ -91,6 +91,7 @@ function createHarness({ state = baseState(), saveFails = false, confirmResult =
       habitTargetValue: document.querySelector("#habitTargetValue"),
       habitUnitField: document.querySelector("#habitUnitField"),
       habitUnit: document.querySelector("#habitUnit"),
+      habitIncludeInPlanner: document.querySelector("#habitIncludeInPlanner"),
       habitDayInputs: [...document.querySelectorAll('input[name="habitDay"]')],
       habitSubmitButton: document.querySelector("#habitSubmitButton"),
       habitArchiveButton: document.querySelector("#habitArchiveButton"),
@@ -183,6 +184,18 @@ test("creating a boolean habit saves once and leaves unrelated state unchanged",
   assert.equal(state.habits[0].metricType, "boolean");
   assert.equal(harness.saveCalls, 1);
   Object.entries(protectedState).forEach(([key, value]) => assert.deepEqual(state[key], value));
+});
+
+test("planner inclusion is optional and round-trips through the habit editor", () => {
+  const harness = createHarness();
+  harness.api.openHabitEditor();
+  harness.els.habitTitle.value = "阅读";
+  selectMetric(harness, "duration", 60, "分钟");
+  harness.els.habitIncludeInPlanner.checked = true;
+  harness.api.saveHabitFromForm({ preventDefault() {} }, NOW + 1);
+  assert.equal(harness.state.habits[0].includeInPlanner, true);
+  harness.api.openHabitEditor(harness.state.habits[0]);
+  assert.equal(harness.els.habitIncludeInPlanner.checked, true);
 });
 
 test("count and duration forms preserve target and unit semantics", () => {
@@ -289,4 +302,14 @@ test("habit mobile layout keeps the week strip readable and list vertically scro
   assert.match(stylesSource, /\.habit-week-strip \{[\s\S]*?repeat\(7, minmax\(0, 1fr\)\)/);
   assert.match(stylesSource, /@media \(max-width: 560px\)[\s\S]*?\.habit-panel \{[\s\S]*?overflow: hidden auto;/);
   assert.match(stylesSource, /\.habit-list \{[\s\S]*?overflow: visible;/);
+});
+
+test("numeric habits show partial progress and an explicit target state", () => {
+  const countHabit = habit({ metricType: "count", targetValue: 5, unit: "次" });
+  const partial = createHarness({ state: baseState({ habits: [countHabit], habitEntries: [entry({ value: 2 })] }) });
+  partial.api.renderHabits();
+  assert.match(partial.els.habitList.textContent, /已完成 2\/5 次/);
+  const complete = createHarness({ state: baseState({ habits: [countHabit], habitEntries: [entry({ value: 5 })] }) });
+  complete.api.renderHabits();
+  assert.match(complete.els.habitList.textContent, /已达标/);
 });

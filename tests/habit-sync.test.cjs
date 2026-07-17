@@ -144,6 +144,43 @@ test("cloudSafeState preserves normalized habits and unique entries", () => {
   assert.equal(snapshot.habitEntries[0].value, 2);
 });
 
+test("habit activity progress and planner opt-in survive whole-state sync", () => {
+  const durationHabit = habit({
+    metricType: "duration",
+    targetValue: 60,
+    unit: "分钟",
+    includeInPlanner: true,
+  });
+  const completedSession = {
+    id: "habit-session-1",
+    type: "habit",
+    taskId: null,
+    habitId: durationHabit.id,
+    habitMetricType: "duration",
+    habitValue: 25,
+    title: durationHabit.title,
+    color: durationHabit.color,
+    startAt: NOW,
+    endAt: NOW + 25 * 60_000,
+    minutes: 25,
+    status: "completed",
+    endReason: "manual",
+    note: "",
+    focusSessionId: null,
+    createdAt: NOW,
+    updatedAt: NOW + 25 * 60_000,
+  };
+  const merged = createSyncApi().mergeSyncedStates(
+    baseState({ habits: [durationHabit], activitySessions: [completedSession] }),
+    baseState({ habits: [habit({ updatedAt: NOW - 1 })], habitEntries: [entry({ value: 0, updatedAt: NOW - 1 })] })
+  );
+
+  assert.equal(merged.habits[0].includeInPlanner, true);
+  assert.equal(merged.habitEntries.length, 1);
+  assert.equal(merged.habitEntries[0].value, 25);
+  assert.equal(merged.habitEntries[0].manualValue, 0);
+});
+
 test("habit sync does not modify task, activity, focus, flame or plan data", () => {
   const protectedFields = {
     tasks: [{ id: "task" }],

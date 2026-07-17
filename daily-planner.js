@@ -492,6 +492,7 @@
     if (!Number.isFinite(now)) throw new TypeError("buildDailyPlan requires a finite now timestamp");
 
     const tasks = Array.isArray(input.tasks) ? input.tasks : [];
+    const habits = Array.isArray(input.habits) ? input.habits : [];
     const courses = Array.isArray(input.courses) ? input.courses : [];
     const focusSessions = Array.isArray(input.focusSessions) ? input.focusSessions : [];
     const adoptedBlocks = Array.isArray(input.adoptedBlocks) ? input.adoptedBlocks : [];
@@ -504,12 +505,11 @@
     const planningStartAt = Math.max(windowStartAt, ceilToFiveMinutes(now));
     const warnings = [];
 
-    const openPriorities = tasks
+    const taskPriorities = tasks
       .map((task, index) => ({ task, index }))
       .filter(({ task }) => task && task.done !== true)
       .map(({ task, index }) => taskPriority(task, index, now, dayStart, nextDayStart))
       .sort(comparePriorities)
-      .slice(0, 3)
       .map((priority, index) => ({
         rank: index + 1,
         taskId: priority.taskId,
@@ -520,6 +520,27 @@
         reasons: priorityReasons(priority, now),
         _stableId: priority.stableId,
       }));
+    const habitPriorities = habits
+      .filter((habit) => habit && habit.includeInPlanner === true && habit.scheduledToday === true
+        && habit.completed !== true && stableText(habit.id).trim())
+      .map((habit, index) => ({
+        rank: taskPriorities.length + index + 1,
+        taskId: null,
+        habitId: stableText(habit.id).trim(),
+        planningEntityType: "habit",
+        title: stableText(habit.title) || "未命名习惯",
+        startAt: null,
+        deadlineAt: null,
+        overdue: false,
+        remainingMinutes: habit.metricType === "duration" && Number.isFinite(Number(habit.remainingValue))
+          ? Math.max(0, Number(habit.remainingValue))
+          : null,
+        reasons: ["今日习惯尚未达标"],
+        _stableId: `habit:${stableText(habit.id).trim()}`,
+      }));
+    const openPriorities = [...taskPriorities, ...habitPriorities]
+      .slice(0, 3)
+      .map((priority, index) => ({ ...priority, rank: index + 1 }));
 
     tasks.forEach((task, index) => {
       if (!task || task.done === true) return;
@@ -583,8 +604,12 @@
         const startAt = ceilToFiveMinutes(Math.max(free.startAt, nextFocusStartAt));
         const availableEndAt = Math.min(free.endAt, latestEndAt);
         const availableMinutes = floorToFiveMinutes((availableEndAt - startAt) / 60000);
-        if (availableMinutes < MIN_FOCUS_MINUTES) continue;
-        const minutes = Math.min(targetMinutes, availableMinutes);
+        const minimumMinutes = priority.habitId ? 5 : MIN_FOCUS_MINUTES;
+        const cappedMinutes = priority.habitId && Number.isFinite(priority.remainingMinutes)
+          ? Math.min(targetMinutes, availableMinutes, floorToFiveMinutes(priority.remainingMinutes))
+          : Math.min(targetMinutes, availableMinutes);
+        if (availableMinutes < minimumMinutes || cappedMinutes < minimumMinutes) continue;
+        const minutes = cappedMinutes;
         selected = { startAt, endAt: startAt + minutes * 60000, minutes };
         break;
       }
@@ -593,7 +618,7 @@
           code: "NO_FOCUS_SLOT",
           severity: "warning",
           message: `${priority.title} 没有至少 20 分钟的可用专注时段`,
-          sourceIds: priority.taskId ? [priority.taskId] : [],
+          sourceIds: priority.taskId ? [priority.taskId] : priority.habitId ? [priority.habitId] : [],
         });
         continue;
       }
@@ -601,6 +626,7 @@
       blocks.push({
         id: `${dateKey(dayStart)}:${blockIdentity}:${selected.startAt}`,
         taskId: priority.taskId,
+        ...(priority.habitId ? { habitId: priority.habitId, planningMode: "habit" } : {}),
         title: `专注 · ${priority.title}`,
         startAt: selected.startAt,
         endAt: selected.endAt,
@@ -655,7 +681,7 @@
         planningStartAt: Math.min(planningStartAt, windowEndAt),
       },
       focusTargetMinutes: targetMinutes,
-      priorities: openPriorities.map(({ _stableId, ...priority }) => priority),
+      priorities: openPriorities.map(({ _stableId, remainingMinutes, ...priority }) => priority),
       blocks,
       warnings,
     };

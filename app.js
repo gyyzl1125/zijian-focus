@@ -217,6 +217,7 @@ const els = {
   habitTargetValue: document.querySelector("#habitTargetValue"),
   habitUnitField: document.querySelector("#habitUnitField"),
   habitUnit: document.querySelector("#habitUnit"),
+  habitIncludeInPlanner: document.querySelector("#habitIncludeInPlanner"),
   habitDayInputs: [...document.querySelectorAll('input[name="habitDay"]')],
   habitSubmitButton: document.querySelector("#habitSubmitButton"),
   habitArchiveButton: document.querySelector("#habitArchiveButton"),
@@ -543,6 +544,18 @@ function normalizeState() {
   if (habitApi?.normalizeHabits && habitApi?.normalizeHabitEntries) {
     state.habits = habitApi.normalizeHabits(state.habits, Date.now());
     state.habitEntries = habitApi.normalizeHabitEntries(state.habitEntries, Date.now());
+    if (habitApi.reconcileHabitEntriesFromSessions) {
+      state.habitEntries = habitApi.reconcileHabitEntriesFromSessions(
+        state.habits,
+        state.habitEntries,
+        state.activitySessions,
+        Math.max(
+          ...state.activitySessions.map((session) => Number(session.updatedAt) || 0),
+          ...state.habitEntries.map((entry) => Number(entry.updatedAt) || 0),
+          0
+        )
+      );
+    }
   } else {
     state.habits = Array.isArray(state.habits) ? state.habits : [];
     state.habitEntries = Array.isArray(state.habitEntries) ? state.habitEntries : [];
@@ -762,6 +775,19 @@ function mergeSyncedStates(local, remote) {
   if (habitApi?.mergeHabits && habitApi?.mergeHabitEntries) {
     merged.habits = habitApi.mergeHabits(local?.habits, remote?.habits);
     merged.habitEntries = habitApi.mergeHabitEntries(local?.habitEntries, remote?.habitEntries);
+    if (habitApi.reconcileHabitEntriesFromSessions) {
+      const revision = Math.max(
+        ...merged.activitySessions.map((session) => Number(session.updatedAt) || 0),
+        ...merged.habitEntries.map((entry) => Number(entry.updatedAt) || 0),
+        0
+      );
+      merged.habitEntries = habitApi.reconcileHabitEntriesFromSessions(
+        merged.habits,
+        merged.habitEntries,
+        merged.activitySessions,
+        revision
+      );
+    }
   } else {
     merged.habits = mergeById(local?.habits, remote?.habits, preferRemote);
     merged.habitEntries = mergeById(local?.habitEntries, remote?.habitEntries, preferRemote);
@@ -809,6 +835,18 @@ function cloudSafeState() {
   if (habitApi?.normalizeHabits && habitApi?.normalizeHabitEntries) {
     snapshot.habits = habitApi.normalizeHabits(snapshot.habits, Date.now());
     snapshot.habitEntries = habitApi.normalizeHabitEntries(snapshot.habitEntries, Date.now());
+    if (habitApi.reconcileHabitEntriesFromSessions) {
+      snapshot.habitEntries = habitApi.reconcileHabitEntriesFromSessions(
+        snapshot.habits,
+        snapshot.habitEntries,
+        snapshot.activitySessions,
+        Math.max(
+          ...snapshot.activitySessions.map((session) => Number(session.updatedAt) || 0),
+          ...snapshot.habitEntries.map((entry) => Number(entry.updatedAt) || 0),
+          0
+        )
+      );
+    }
   } else {
     snapshot.habits = Array.isArray(snapshot.habits) ? snapshot.habits : [];
     snapshot.habitEntries = Array.isArray(snapshot.habitEntries) ? snapshot.habitEntries : [];
@@ -2047,10 +2085,13 @@ function renderTimelineTaskPicker() {
     .sort((left, right) => Number(left.endAt || 0) - Number(right.endAt || 0)
       || String(left.title || "").localeCompare(String(right.title || ""))
       || String(left.id).localeCompare(String(right.id)));
+  const habits = globalThis.Habits?.normalizeHabits?.(state.habits, Date.now())
+    ?.filter((habit) => habit.archivedAt === null && ["duration", "count"].includes(habit.metricType))
+    .sort((left, right) => String(left.title || "").localeCompare(String(right.title || "")) || String(left.id).localeCompare(String(right.id))) || [];
   els.timelineTaskSelect.replaceChildren();
   const placeholder = document.createElement("option");
   placeholder.value = "";
-  placeholder.textContent = tasks.length > 0 ? "选择一个未完成任务" : "暂无未完成任务";
+  placeholder.textContent = tasks.length + habits.length > 0 ? "选择任务或可执行习惯" : "暂无可执行项目";
   els.timelineTaskSelect.append(placeholder);
   tasks.forEach((task) => {
     const option = document.createElement("option");
@@ -2058,11 +2099,18 @@ function renderTimelineTaskPicker() {
     option.textContent = String(task.title || "未命名任务");
     els.timelineTaskSelect.append(option);
   });
-  els.timelineTaskSelect.value = tasks.some((task) => String(task.id) === previousValue) ? previousValue : "";
+  habits.forEach((habit) => {
+    const option = document.createElement("option");
+    option.value = `habit:${habit.id}`;
+    option.textContent = `习惯 · ${String(habit.title || "未命名习惯")}`;
+    els.timelineTaskSelect.append(option);
+  });
+  const validValues = new Set([...tasks.map((task) => String(task.id)), ...habits.map((habit) => `habit:${habit.id}`)]);
+  els.timelineTaskSelect.value = validValues.has(previousValue) ? previousValue : "";
   const canStart = Boolean(els.timelineTaskSelect.value);
   els.timelineStartButton.disabled = !canStart;
   els.timelineStartButton.setAttribute("aria-disabled", String(!canStart));
-  if (els.timelineTaskEmpty) els.timelineTaskEmpty.hidden = tasks.length > 0;
+  if (els.timelineTaskEmpty) els.timelineTaskEmpty.hidden = tasks.length + habits.length > 0;
 }
 
 function renderRunningActivity(now = Date.now()) {
@@ -2083,13 +2131,24 @@ function applyActivityUiResult(result, successTitle, successBody) {
   if (!result?.ok || !result.changed) return false;
   const previousSessions = state.activitySessions;
   const previousActiveId = state.activeActivitySessionId;
+  const previousHabitEntries = state.habitEntries;
   const previousSyncUpdatedAt = state.syncUpdatedAt;
   try {
     state.activitySessions = result.sessions;
     state.activeActivitySessionId = result.activeActivitySessionId;
+    const habitApi = globalThis.Habits;
+    if (habitApi?.reconcileHabitEntriesFromSessions) {
+      state.habitEntries = habitApi.reconcileHabitEntriesFromSessions(
+        state.habits,
+        state.habitEntries,
+        state.activitySessions,
+        Math.max(...state.activitySessions.map((session) => Number(session.updatedAt) || 0), 0)
+      );
+    }
     const saved = saveState();
     if (saved === false) throw new Error("saveState returned false");
     renderTimeline();
+    if (typeof renderHabits === "function") renderHabits();
     if (els.timelineActivityStatus) els.timelineActivityStatus.textContent = successTitle;
     showReminderToast(successTitle, successBody);
     return true;
@@ -2097,6 +2156,7 @@ function applyActivityUiResult(result, successTitle, successBody) {
     console.error("Activity session save failed:", error);
     state.activitySessions = previousSessions;
     state.activeActivitySessionId = previousActiveId;
+    state.habitEntries = previousHabitEntries;
     state.syncUpdatedAt = previousSyncUpdatedAt;
     renderTimeline();
     showReminderToast("保存失败", "实际活动记录没有保存，请稍后重试。");
@@ -2106,33 +2166,37 @@ function applyActivityUiResult(result, successTitle, successBody) {
 
 function startSelectedTaskActivity(now = Date.now()) {
   const activityApi = globalThis.ActivitySessions;
-  const taskId = String(els.timelineTaskSelect?.value || "");
-  const task = (state.tasks || []).find((item) => String(item?.id) === taskId && !item.done);
-  if (!activityApi || !task) {
+  const selectedValue = String(els.timelineTaskSelect?.value || "");
+  const isHabit = selectedValue.startsWith("habit:");
+  const entityId = isHabit ? selectedValue.slice(6) : selectedValue;
+  const entity = isHabit
+    ? (state.habits || []).find((item) => String(item?.id) === entityId && item.archivedAt === null && ["duration", "count"].includes(item.metricType))
+    : (state.tasks || []).find((item) => String(item?.id) === entityId && !item.done);
+  if (!activityApi || !entity) {
     renderTimelineTaskPicker();
-    showReminderToast("无法开始任务", "请选择一个仍未完成的任务。");
+    showReminderToast("无法开始执行", "请选择一个仍可执行的任务或习惯。");
     return false;
   }
   const running = activityApi.getRunningActivitySession(state.activitySessions, state.activeActivitySessionId);
   let result;
   if (!running) {
-    result = activityApi.startTaskActivity({
+    result = (isHabit ? activityApi.startHabitActivity : activityApi.startTaskActivity)({
       sessions: state.activitySessions,
       activeActivitySessionId: state.activeActivitySessionId,
-      task,
+      [isHabit ? "habit" : "task"]: entity,
       now,
       idFactory: () => crypto.randomUUID(),
     });
   } else {
-    const shouldSwitch = confirm(`当前正在进行“${running.title}”，是否结束当前任务并切换到“${task.title}”？`);
+    const shouldSwitch = confirm(`当前正在进行“${running.title}”，是否结束当前活动并切换到“${entity.title}”？`);
     if (!shouldSwitch) return false;
     const isShort = Number(now) - Number(running.startAt) < 60000;
     const keepShort = !isShort || confirm("当前活动不足 1 分钟，是否保留这条实际记录？");
     if (keepShort) {
-      result = activityApi.switchTaskActivity({
+      result = (isHabit ? activityApi.switchHabitActivity : activityApi.switchTaskActivity)({
         sessions: state.activitySessions,
         activeActivitySessionId: state.activeActivitySessionId,
-        task,
+        [isHabit ? "habit" : "task"]: entity,
         now,
         idFactory: () => crypto.randomUUID(),
       });
@@ -2142,20 +2206,20 @@ function startSelectedTaskActivity(now = Date.now()) {
         activeActivitySessionId: state.activeActivitySessionId,
         now,
       });
-      result = cancelled.ok ? activityApi.startTaskActivity({
+      result = cancelled.ok ? (isHabit ? activityApi.startHabitActivity : activityApi.startTaskActivity)({
         sessions: cancelled.sessions,
         activeActivitySessionId: null,
-        task,
+        [isHabit ? "habit" : "task"]: entity,
         now,
         idFactory: () => crypto.randomUUID(),
       }) : cancelled;
     }
   }
   if (!result?.ok) {
-    showReminderToast("无法开始任务", "活动状态已经变化，请刷新后重试。");
+    showReminderToast("无法开始执行", "活动状态已经变化，请刷新后重试。");
     return false;
   }
-  return applyActivityUiResult(result, "任务已开始", `正在记录“${task.title}”。`);
+  return applyActivityUiResult(result, isHabit ? "习惯已开始" : "任务已开始", `正在记录“${entity.title}”。`);
 }
 
 function endCurrentTaskActivity(now = Date.now()) {
@@ -3272,6 +3336,7 @@ function resetHabitForm() {
   if (els.habitColor) els.habitColor.value = "sage";
   if (els.habitTargetValue) els.habitTargetValue.value = "1";
   if (els.habitUnit) els.habitUnit.value = "次";
+  if (els.habitIncludeInPlanner) els.habitIncludeInPlanner.checked = false;
   els.habitDayInputs?.forEach((input) => { input.checked = true; });
   if (els.habitEditorTitle) els.habitEditorTitle.textContent = "新增习惯";
   if (els.habitSubmitButton) els.habitSubmitButton.textContent = "保存习惯";
@@ -3291,6 +3356,7 @@ function openHabitEditor(habit = null) {
     els.habitColor.value = habit.color;
     els.habitTargetValue.value = String(habit.targetValue);
     els.habitUnit.value = habit.unit;
+    if (els.habitIncludeInPlanner) els.habitIncludeInPlanner.checked = habit.includeInPlanner === true;
     const days = new Set(habit.daysOfWeek);
     els.habitDayInputs.forEach((input) => { input.checked = days.has(Number(input.value)); });
     updateHabitMetricFields();
@@ -3335,6 +3401,7 @@ function habitDraftFromForm() {
     metricType: els.habitMetricType?.value || "boolean",
     targetValue: Number(els.habitTargetValue?.value || 1),
     unit: String(els.habitUnit?.value || "").trim(),
+    includeInPlanner: Boolean(els.habitIncludeInPlanner?.checked),
     daysOfWeek: els.habitDayInputs.filter((input) => input.checked).map((input) => Number(input.value)),
   };
 }
@@ -3373,7 +3440,8 @@ function archiveEditingHabit(now = Date.now()) {
 function setHabitValue(habitId, value, now = Date.now()) {
   const habit = state.habits.find((item) => String(item.id) === String(habitId) && item.archivedAt === null);
   if (!habit) return false;
-  const result = habitApi()?.setHabitEntry?.({ entries: state.habitEntries, habit, dayKey: selectedHabitDate, value, now });
+  const sessionValue = habitApi()?.getHabitSessionValue?.(state.activitySessions, habit, selectedHabitDate) || 0;
+  const result = habitApi()?.setHabitEntry?.({ entries: state.habitEntries, habit, dayKey: selectedHabitDate, value, now, sessionValue });
   if (!result?.ok) return result?.reason === "NO_CHANGE";
   return persistHabitCollections(state.habits, result.entries, Number(value) >= habit.targetValue ? "打卡完成" : "打卡已更新");
 }
@@ -3623,7 +3691,9 @@ function renderHabits() {
     const value = Number(entry?.value || 0);
     meta.textContent = habit.metricType === "boolean"
       ? completed ? "今日已完成" : "今日待完成"
-      : `${value} / ${habit.targetValue} ${habit.unit}`;
+      : completed
+        ? `已达标 · ${value}/${habit.targetValue} ${habit.unit}`
+        : `已完成 ${value}/${habit.targetValue} ${habit.unit}`;
     copy.append(title, meta);
     const edit = document.createElement("button");
     edit.type = "button";
@@ -4837,7 +4907,29 @@ function getDailyPlanPreviewInput(now) {
   const fixedTaskIds = tasks
     .filter((task) => globalThis.DailyPlanner.isFixedTimeTask(task))
     .map((task) => String(task.id));
-  return { now: timestamp, tasks, courses, focusSessions, fixedTaskIds };
+  const habitApi = globalThis.Habits;
+  const todayKey = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, "0")}-${String(current.getDate()).padStart(2, "0")}`;
+  const entries = habitApi?.normalizeHabitEntries?.(state.habitEntries, timestamp) || [];
+  const habits = (habitApi?.getHabitsForDay?.(state.habits, todayKey) || [])
+    .filter((habit) => habit.includeInPlanner === true && habit.metricType !== "boolean")
+    .map((habit) => {
+      const entry = entries.find((item) => item.habitId === habit.id && item.dayKey === todayKey);
+      const value = Math.max(0, Number(entry?.value) || 0);
+      return {
+        id: habit.id,
+        title: habit.title,
+        color: habit.color,
+        metricType: habit.metricType,
+        targetValue: habit.targetValue,
+        currentValue: value,
+        remainingValue: Math.max(0, Number(habit.targetValue) - value),
+        completed: value >= Number(habit.targetValue),
+        includeInPlanner: true,
+        scheduledToday: true,
+      };
+    })
+    .filter((habit) => !habit.completed);
+  return { now: timestamp, tasks, habits, courses, focusSessions, fixedTaskIds };
 }
 
 function getDeadlineSprintEligibleTasks(now) {
@@ -5534,6 +5626,8 @@ function normalizeDailyPlanForDisplay(plan, expectedDayKey = null, requireAdopte
     .map((priority, index) => ({
       rank: Number(priority.rank) || index + 1,
       taskId: priority.taskId === null || priority.taskId === undefined ? null : String(priority.taskId),
+      habitId: priority.habitId === null || priority.habitId === undefined ? null : String(priority.habitId),
+      planningEntityType: priority.planningEntityType === "habit" ? "habit" : "task",
       title: String(priority.title || "未命名任务"),
       startAt: Number.isFinite(Number(priority.startAt)) ? Number(priority.startAt) : null,
       deadlineAt: Number.isFinite(Number(priority.deadlineAt)) ? Number(priority.deadlineAt) : null,
@@ -5544,7 +5638,8 @@ function normalizeDailyPlanForDisplay(plan, expectedDayKey = null, requireAdopte
   const rawBlocks = Array.isArray(plan.blocks) ? plan.blocks
     .filter((block) => block && typeof block === "object"
       && String(block.id || "").trim()
-      && block.taskId !== null && block.taskId !== undefined && String(block.taskId).trim()
+      && ((block.taskId !== null && block.taskId !== undefined && String(block.taskId).trim())
+        || (block.habitId !== null && block.habitId !== undefined && String(block.habitId).trim()))
       && Number.isFinite(Number(block.startAt))
       && Number.isFinite(Number(block.endAt))
       && Number(block.endAt) > Number(block.startAt)
@@ -5560,7 +5655,8 @@ function normalizeDailyPlanForDisplay(plan, expectedDayKey = null, requireAdopte
     .slice(0, version === 2 ? rawBlocks.length : 3)
     .map((block) => ({
       id: String(block.id),
-      taskId: String(block.taskId),
+      taskId: block.taskId === null || block.taskId === undefined ? null : String(block.taskId),
+      habitId: block.habitId === null || block.habitId === undefined ? null : String(block.habitId),
       title: String(block.title || "专注时段"),
       startAt: Number(block.startAt),
       endAt: Number(block.endAt),
@@ -5628,6 +5724,9 @@ function getAdoptedFocusBlocksForDay(dayKeyValue) {
   const activeTaskIds = new Set((Array.isArray(state.tasks) ? state.tasks : [])
     .filter((task) => task?.id !== undefined && task?.id !== null)
     .map((task) => String(task.id)));
+  const activeHabitIds = new Set((Array.isArray(state.habits) ? state.habits : [])
+    .filter((habit) => habit?.archivedAt === null && habit?.id !== undefined && habit?.id !== null)
+    .map((habit) => String(habit.id)));
   const seenBlockIds = new Set();
   const blocks = [];
 
@@ -5642,7 +5741,8 @@ function getAdoptedFocusBlocksForDay(dayKeyValue) {
     plan.blocks.forEach((block) => {
       const id = String(block.id || "").trim();
       const taskId = block.taskId === null || block.taskId === undefined ? "" : String(block.taskId);
-      if (!id || !taskId || seenBlockIds.has(id)) return;
+      const habitId = block.habitId === null || block.habitId === undefined ? "" : String(block.habitId);
+      if (!id || (!taskId && !habitId) || seenBlockIds.has(id)) return;
       if (!Number.isFinite(block.startAt) || !Number.isFinite(block.endAt) || block.endAt <= block.startAt) return;
       if (!Number.isFinite(block.minutes) || block.minutes <= 0) return;
       const startAt = Math.max(block.startAt, bounds.startAt);
@@ -5652,6 +5752,7 @@ function getAdoptedFocusBlocksForDay(dayKeyValue) {
       blocks.push({
         id,
         taskId,
+        habitId: habitId || null,
         title: String(block.title || "计划专注"),
         startAt,
         endAt,
@@ -5663,7 +5764,7 @@ function getAdoptedFocusBlocksForDay(dayKeyValue) {
         planningMode: block.planningMode,
         sprintId: block.sprintId || "",
         color: "lavender",
-        orphaned: !activeTaskIds.has(taskId),
+        orphaned: habitId ? !activeHabitIds.has(habitId) : !activeTaskIds.has(taskId),
       });
     });
   });

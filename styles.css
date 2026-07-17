@@ -3853,6 +3853,21 @@ button.timeline-task-card {
   gap: 10px;
 }
 
+.habit-planner-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.habit-planner-option input {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+}
+
 .habit-days-fieldset {
   margin: 0;
   border: 0;

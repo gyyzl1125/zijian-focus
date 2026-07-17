@@ -6,6 +6,7 @@ const fs = require("node:fs");
 const vm = require("node:vm");
 const { DOMParser } = require("linkedom");
 const ActivitySessions = require("../activity-sessions.js");
+const Habits = require("../habits.js");
 
 const appSource = fs.readFileSync("app.js", "utf8");
 const indexSource = fs.readFileSync("index.html", "utf8");
@@ -47,6 +48,7 @@ function session(id, taskId, title, startAt, endAt, overrides = {}) {
 function baseState(overrides = {}) {
   return {
     tasks: [], courses: [], activitySessions: [], activeActivitySessionId: null,
+    habits: [], habitEntries: [],
     focusSessions: [], focusByDate: {}, flames: 0, dailyPlans: {}, syncUpdatedAt: 10,
     ...overrides,
   };
@@ -74,6 +76,7 @@ function createHarness({ state = baseState(), selectedDay = MONDAY, confirmation
     Number, String, Object, Array, Set, Map, Math, Date, Error,
     structuredClone,
     ActivitySessions,
+    Habits,
     crypto: { randomUUID: () => idQueue.shift() || `activity-${idQueue.length}` },
     console: { error() {} },
     confirm(message) {
@@ -295,4 +298,33 @@ test("mobile activity controls avoid horizontal overflow", () => {
   assert.match(stylesSource, /\.timeline-start-row \{[\s\S]*?grid-template-columns: auto minmax\(0, 1fr\) auto;/);
   assert.match(stylesSource, /@media[\s\S]*?\.timeline-start-row \{[\s\S]*?grid-template-columns: 1fr auto;/);
   assert.match(stylesSource, /\.timeline-running-card \{[\s\S]*?min-width: 0;/);
+});
+
+test("timeline offers duration and count habits but keeps boolean habits manual", () => {
+  const habits = [
+    { id: "read", title: "阅读", color: "sage", metricType: "duration", targetValue: 60, unit: "分钟", daysOfWeek: [1], includeInPlanner: true, createdAt: at(MONDAY, 0), updatedAt: at(MONDAY, 0), archivedAt: null },
+    { id: "water", title: "喝水", color: "sky", metricType: "count", targetValue: 8, unit: "次", daysOfWeek: [1], includeInPlanner: false, createdAt: at(MONDAY, 0), updatedAt: at(MONDAY, 0), archivedAt: null },
+    { id: "sleep", title: "早睡", color: "rose", metricType: "boolean", targetValue: 1, unit: "", daysOfWeek: [1], includeInPlanner: false, createdAt: at(MONDAY, 0), updatedAt: at(MONDAY, 0), archivedAt: null },
+  ];
+  const harness = createHarness({ state: baseState({ habits }) });
+  harness.api.render(at(MONDAY, 9));
+  const values = [...harness.els.timelineTaskSelect.options].map((option) => option.value);
+  assert.ok(values.includes("habit:read"));
+  assert.ok(values.includes("habit:water"));
+  assert.ok(!values.includes("habit:sleep"));
+});
+
+test("ending a duration habit updates its daily entry without touching task or focus data", () => {
+  const read = { id: "read", title: "阅读", color: "sage", metricType: "duration", targetValue: 60, unit: "分钟", daysOfWeek: [1], includeInPlanner: true, createdAt: at(MONDAY, 0), updatedAt: at(MONDAY, 0), archivedAt: null };
+  const state = baseState({ habits: [read], tasks: [task("task-1", "任务")], focusSessions: [{ id: "focus" }], focusByDate: { [MONDAY]: 25 }, flames: 4, dailyPlans: { [MONDAY]: { marker: true } } });
+  const protectedBefore = plain({ tasks: state.tasks, focusSessions: state.focusSessions, focusByDate: state.focusByDate, flames: state.flames, dailyPlans: state.dailyPlans });
+  const harness = createHarness({ state, ids: ["habit-run"] });
+  harness.api.render(at(MONDAY, 9));
+  selectTask(harness, "habit:read");
+  assert.equal(harness.api.start(at(MONDAY, 9)), true);
+  assert.equal(state.activitySessions[0].habitId, "read");
+  assert.equal(harness.api.end(at(MONDAY, 9, 25)), true);
+  assert.equal(state.habitEntries[0].value, 25);
+  assert.match(harness.els.timelineList.textContent, /阅读/);
+  assert.deepEqual(plain({ tasks: state.tasks, focusSessions: state.focusSessions, focusByDate: state.focusByDate, flames: state.flames, dailyPlans: state.dailyPlans }), protectedBefore);
 });

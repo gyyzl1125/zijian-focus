@@ -54,6 +54,7 @@
       targetValue,
       unit: metricType === "boolean" ? "" : cleanText(raw.unit, defaultUnit),
       daysOfWeek: normalizeDaysOfWeek(raw.daysOfWeek),
+      includeInPlanner: raw.includeInPlanner === true,
       createdAt,
       updatedAt,
       archivedAt,
@@ -103,7 +104,16 @@
     const createdAt = finiteTimestamp(raw.createdAt) ?? finiteTimestamp(raw.updatedAt) ?? finiteTimestamp(now);
     const updatedAt = finiteTimestamp(raw.updatedAt) ?? createdAt;
     if (createdAt === null || updatedAt === null) return null;
-    return { id: key, habitId, dayKey, value, createdAt, updatedAt };
+    const manualValue = Number(raw.manualValue);
+    return {
+      id: key,
+      habitId,
+      dayKey,
+      value,
+      ...(Number.isFinite(manualValue) && manualValue >= 0 ? { manualValue } : {}),
+      createdAt,
+      updatedAt,
+    };
   }
 
   function chooseEntry(left, right) {
@@ -164,17 +174,20 @@
     return { ok: true, habit: archived, habits: current.map((habit) => habit.id === id ? archived : habit) };
   }
 
-  function setHabitEntry({ entries, habit, dayKey, value, now }) {
+  function setHabitEntry({ entries, habit, dayKey, value, now, sessionValue = 0 }) {
     const timestamp = finiteTimestamp(now);
     const normalizedHabit = normalizeHabit(habit, timestamp ?? Date.now());
     const key = habitEntryKey(normalizedHabit?.id, dayKey);
     const numericValue = normalizedHabit?.metricType === "boolean" ? (Number(value) > 0 ? 1 : 0) : Number(value);
+    const normalizedSessionValue = Number.isFinite(Number(sessionValue)) && Number(sessionValue) >= 0 ? Number(sessionValue) : 0;
     const current = normalizeHabitEntries(entries, timestamp ?? Date.now());
     if (timestamp === null || !normalizedHabit || !key || !Number.isFinite(numericValue) || numericValue < 0) {
       return { ok: false, reason: "INVALID_ENTRY", entries: current };
     }
     const previous = current.find((entry) => entry.id === key);
-    if (previous && previous.value === numericValue) {
+    const manualValue = normalizedHabit.metricType === "boolean" ? null : Math.max(0, numericValue - normalizedSessionValue);
+    if (previous && previous.value === numericValue
+      && (normalizedHabit.metricType === "boolean" || previous.manualValue === manualValue)) {
       return { ok: false, reason: "NO_CHANGE", entry: previous, entries: current };
     }
     const entry = {
@@ -182,6 +195,7 @@
       habitId: normalizedHabit.id,
       dayKey: normalizeDayKey(dayKey),
       value: numericValue,
+      ...(normalizedHabit.metricType === "boolean" ? {} : { manualValue }),
       createdAt: previous?.createdAt ?? timestamp,
       updatedAt: Math.max(previous?.updatedAt ?? timestamp, timestamp),
     };
@@ -211,6 +225,88 @@
     const end = new Date(start);
     end.setDate(start.getDate() + 1);
     return { startAt: start.getTime(), endAt: end.getTime(), weekday: start.getDay() || 7 };
+  }
+
+  function dayKeyFromTimestamp(value) {
+    const timestamp = finiteTimestamp(Number(value));
+    if (timestamp === null) return "";
+    const date = new Date(timestamp);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  }
+
+  function getHabitSessionValue(sessions, habit, dayKey) {
+    const normalizedHabit = normalizeHabit(habit);
+    const bounds = dayBounds(dayKey);
+    if (!normalizedHabit || normalizedHabit.metricType === "boolean" || !bounds) return 0;
+    return (Array.isArray(sessions) ? sessions : []).reduce((sum, session) => {
+      if (!session || session.type !== "habit" || String(session.habitId || "") !== normalizedHabit.id
+        || session.status !== "completed") return sum;
+      const startAt = Number(session.startAt);
+      if (!Number.isFinite(startAt) || startAt < bounds.startAt || startAt >= bounds.endAt) return sum;
+      if (normalizedHabit.metricType === "duration") return sum + Math.max(0, Number(session.minutes) || 0);
+      const value = Number(session.habitValue);
+      return sum + (Number.isFinite(value) && value >= 0 ? value : 1);
+    }, 0);
+  }
+
+  function reconcileHabitEntryFromSessions({ entries, habit, dayKey, sessions, now }) {
+    const timestamp = finiteTimestamp(now);
+    const normalizedHabit = normalizeHabit(habit, timestamp ?? Date.now());
+    const current = normalizeHabitEntries(entries, timestamp ?? Date.now());
+    const key = habitEntryKey(normalizedHabit?.id, dayKey);
+    if (timestamp === null || !normalizedHabit || normalizedHabit.metricType === "boolean" || !key) {
+      return { ok: false, changed: false, reason: "INVALID_INPUT", entries: current, entry: null };
+    }
+    const previous = current.find((entry) => entry.id === key) || null;
+    const manualValue = Number.isFinite(Number(previous?.manualValue))
+      ? Math.max(0, Number(previous.manualValue))
+      : Math.max(0, Number(previous?.value) || 0);
+    const sessionValue = getHabitSessionValue(sessions, normalizedHabit, dayKey);
+    const value = manualValue + sessionValue;
+    if (!previous && value === 0) return { ok: true, changed: false, entries: current, entry: null, sessionValue };
+    if (previous && previous.value === value && previous.manualValue === manualValue) {
+      return { ok: true, changed: false, entries: current, entry: previous, sessionValue };
+    }
+    const entry = {
+      id: key,
+      habitId: normalizedHabit.id,
+      dayKey: normalizeDayKey(dayKey),
+      value,
+      manualValue,
+      createdAt: previous?.createdAt ?? timestamp,
+      updatedAt: Math.max(previous?.updatedAt ?? timestamp, timestamp),
+    };
+    return {
+      ok: true,
+      changed: true,
+      entry,
+      sessionValue,
+      entries: normalizeHabitEntries([...current.filter((item) => item.id !== key), entry], timestamp),
+    };
+  }
+
+  function reconcileHabitEntriesFromSessions(habits, entries, sessions, now) {
+    const timestamp = finiteTimestamp(now);
+    if (timestamp === null) return normalizeHabitEntries(entries);
+    const normalizedHabits = normalizeHabits(habits, timestamp).filter((habit) => habit.metricType !== "boolean");
+    const habitById = new Map(normalizedHabits.map((habit) => [habit.id, habit]));
+    const pairs = new Set();
+    normalizeHabitEntries(entries, timestamp).forEach((entry) => {
+      if (habitById.has(entry.habitId)) pairs.add(`${entry.habitId}::${entry.dayKey}`);
+    });
+    (Array.isArray(sessions) ? sessions : []).forEach((session) => {
+      const habitId = cleanId(session?.habitId);
+      const dayKey = dayKeyFromTimestamp(Number(session?.startAt));
+      if (habitById.has(habitId) && dayKey) pairs.add(`${habitId}::${dayKey}`);
+    });
+    let result = normalizeHabitEntries(entries, timestamp);
+    [...pairs].sort().forEach((pair) => {
+      const splitAt = pair.indexOf("::");
+      const habitId = pair.slice(0, splitAt);
+      const dayKey = pair.slice(splitAt + 2);
+      result = reconcileHabitEntryFromSessions({ entries: result, habit: habitById.get(habitId), dayKey, sessions, now: timestamp }).entries;
+    });
+    return result;
   }
 
   function getHabitsForDay(habits, dayKey) {
@@ -319,6 +415,9 @@
     updateHabit,
     archiveHabit,
     setHabitEntry,
+    getHabitSessionValue,
+    reconcileHabitEntryFromSessions,
+    reconcileHabitEntriesFromSessions,
     getHabitEntry,
     isHabitComplete,
     getHabitsForDay,

@@ -23,6 +23,7 @@
     "test:habit-dom": "node --test tests/habit-dom.test.cjs",
     "test:habit-stats": "node --test tests/habit-stats.test.cjs",
     "test:habit-stats-dom": "node --test tests/habit-stats-dom.test.cjs",
+    "test:habit-activity": "node --test tests/habit-activity.test.cjs",
     "test:deadline-sprint": "node --test tests/deadline-sprint.test.cjs",
     "test:deadline-sprint-dom": "node --test tests/deadline-sprint-dom.test.cjs",
     "test:deadline-sprint-adoption": "node --test tests/deadline-sprint-adoption.test.cjs",

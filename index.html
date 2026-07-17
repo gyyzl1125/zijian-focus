@@ -209,11 +209,11 @@
       <section class="app-view" id="timelineView" data-view="timeline" aria-label="时间轴">
         <section class="timeline-card">
           <div class="week-strip" id="weekStrip" aria-label="选择实际记录日期"></div>
-          <section class="timeline-activity-control" aria-label="任务活动记录">
+          <section class="timeline-activity-control" aria-label="任务与习惯实际活动记录">
             <div class="timeline-start-row">
-              <label for="timelineTaskSelect">开始任务</label>
+              <label for="timelineTaskSelect">开始执行</label>
               <select id="timelineTaskSelect">
-                <option value="">选择一个未完成任务</option>
+                <option value="">选择任务或可执行习惯</option>
               </select>
               <button id="timelineStartButton" type="button" disabled aria-disabled="true">开始</button>
             </div>
@@ -679,6 +679,7 @@
             <label><input type="checkbox" name="habitDay" value="6" checked /><span>六</span></label>
             <label><input type="checkbox" name="habitDay" value="7" checked /><span>日</span></label>
           </div></fieldset>
+          <label class="habit-planner-option"><input id="habitIncludeInPlanner" type="checkbox" /><span>未达标时加入今日编排建议</span></label>
           <button class="primary-button" id="habitSubmitButton" type="submit">保存习惯</button>
           <button class="habit-archive-button" id="habitArchiveButton" type="button" hidden>归档习惯</button>
         </form>
