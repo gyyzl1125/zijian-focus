@@ -1598,6 +1598,114 @@ body[data-skin="night"] .scene {
   font-weight: 900;
 }
 
+.timeline-activity-control {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 22px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--line), transparent 46%);
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--surface), transparent 18%);
+}
+
+.timeline-start-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.timeline-start-row label {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.timeline-start-row select {
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  padding: 8px 34px 8px 11px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--surface);
+  color: var(--ink);
+  text-overflow: ellipsis;
+}
+
+.timeline-start-row button,
+.timeline-running-actions button {
+  min-height: 42px;
+  padding: 8px 15px;
+  border: 0;
+  border-radius: 13px;
+  background: var(--ink);
+  color: var(--surface);
+  font-weight: 900;
+}
+
+.timeline-start-row button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.timeline-task-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.timeline-running-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--primary), transparent 55%);
+  border-radius: 17px;
+  background: color-mix(in srgb, var(--primary), var(--surface) 92%);
+}
+
+.timeline-running-card[hidden] {
+  display: none;
+}
+
+.timeline-running-card > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.timeline-running-card span,
+.timeline-running-card small {
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.timeline-running-card strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.timeline-running-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.timeline-running-actions > strong {
+  color: var(--primary);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.timeline-task-card.is-actual-activity {
+  border-style: solid;
+}
+
 .small-add-button {
   width: 44px;
   min-height: 36px;
@@ -4121,6 +4229,23 @@ button.timeline-task-card {
 
   .timeline-summary strong {
     font-size: 1.35rem;
+  }
+
+  .timeline-start-row {
+    grid-template-columns: 1fr auto;
+  }
+
+  .timeline-start-row label {
+    grid-column: 1 / -1;
+  }
+
+  .timeline-running-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .timeline-running-actions {
+    justify-content: space-between;
   }
 
   .timeline-item {

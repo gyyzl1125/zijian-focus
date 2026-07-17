@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
 const { DOMParser } = require("linkedom");
+const ActivitySessions = require("../activity-sessions.js");
 
 const appSource = fs.readFileSync("app.js", "utf8");
 const indexSource = fs.readFileSync("index.html", "utf8");
@@ -11,8 +12,9 @@ const helperStart = appSource.indexOf("function dailyPlanDayKey");
 const helperEnd = appSource.indexOf("function createAdoptedDailyPlan", helperStart);
 const renderStart = appSource.indexOf("function renderTimeline");
 const renderEnd = appSource.indexOf("function renderDdl", renderStart);
+const activityRenderStart = appSource.indexOf("function getActivitySessionsForTimelineDay");
 assert.ok(helperStart >= 0 && helperEnd > helperStart, "adopted plan display helpers should exist");
-assert.ok(renderStart >= 0 && renderEnd > renderStart, "schedule renderers should exist");
+assert.ok(activityRenderStart >= 0 && renderStart > activityRenderStart && renderEnd > renderStart, "schedule renderers should exist");
 
 const MONDAY = "2026-07-20";
 const TUESDAY = "2026-07-21";
@@ -49,7 +51,8 @@ function adoptedPlan(dayKey, blocks, overrides = {}) {
 
 function baseState(overrides = {}) {
   return {
-    tasks: [], courses: [], focusSessions: [], focusByDate: {}, flames: 0,
+    tasks: [], courses: [], activitySessions: [], activeActivitySessionId: null,
+    focusSessions: [], focusByDate: {}, flames: 0,
     dailyPlans: {},
     ...overrides,
   };
@@ -69,12 +72,25 @@ function createHarness({ state = baseState(), timelineDay = MONDAY, weekDay = MO
     selectedTimelineDate: timelineDay,
     selectedWeekDate: weekDay,
     eventDetailTaskId: null,
-    Number, String, Object, Array, Set, Map, Math, Date,
+    Number, String, Object, Array, Set, Map, Math, Date, Error,
+    ActivitySessions,
+    crypto: { randomUUID() { return "unused-activity"; } },
+    confirm() { return false; },
+    console: { error() {} },
     els: {
       weekStrip: document.querySelector("#weekStrip"),
       timelineDateTitle: document.querySelector("#timelineDateTitle"),
       timelineStats: document.querySelector("#timelineStats"),
       timelineList: document.querySelector("#timelineList"),
+      timelineTaskSelect: document.querySelector("#timelineTaskSelect"),
+      timelineStartButton: document.querySelector("#timelineStartButton"),
+      timelineTaskEmpty: document.querySelector("#timelineTaskEmpty"),
+      timelineRunningCard: document.querySelector("#timelineRunningCard"),
+      timelineRunningTitle: document.querySelector("#timelineRunningTitle"),
+      timelineRunningStarted: document.querySelector("#timelineRunningStarted"),
+      timelineRunningElapsed: document.querySelector("#timelineRunningElapsed"),
+      timelineEndButton: document.querySelector("#timelineEndButton"),
+      timelineActivityStatus: document.querySelector("#timelineActivityStatus"),
       weekBoard: document.querySelector("#weekBoard"),
       weekRangeTitle: document.querySelector("#weekRangeTitle"),
       eventSheet: document.querySelector("#eventSheet"),
@@ -122,9 +138,11 @@ function createHarness({ state = baseState(), timelineDay = MONDAY, weekDay = MO
     formatDuration(startAt, endAt) { return `${Math.max(1, Math.round((endAt - startAt) / 60000))}分钟`; },
     formatMonthDay(value) { return `${value.getMonth() + 1}.${value.getDate()}`; },
   };
+  context.globalThis = context;
   vm.createContext(context);
   vm.runInContext(`
     ${appSource.slice(helperStart, helperEnd)}
+    ${appSource.slice(activityRenderStart, renderStart)}
     ${appSource.slice(renderStart, renderEnd)}
     this.api = {
       getBlocks: getAdoptedFocusBlocksForDay,
@@ -140,17 +158,17 @@ function createHarness({ state = baseState(), timelineDay = MONDAY, weekDay = MO
   };
 }
 
-test("adopted focus blocks render in the timeline with plan semantics", () => {
+test("adopted focus blocks stay out of the actual timeline and remain in the week schedule", () => {
   const scheduled = block("plan-1", "task-1", "写报告", at(MONDAY, 10), at(MONDAY, 10, 25));
   const harness = createHarness({
     state: baseState({ tasks: [{ id: "task-1", title: "写报告", startAt: at(MONDAY, 9), endAt: at(MONDAY, 18) }], dailyPlans: { [MONDAY]: adoptedPlan(MONDAY, [scheduled]) } }),
   });
   harness.api.renderTimeline();
-  const card = harness.document.querySelector(".timeline-task-card.is-planned-focus");
+  assert.equal(harness.document.querySelector(".timeline-task-card.is-planned-focus"), null);
+  harness.api.renderWeekSchedule();
+  const card = harness.document.querySelector(".week-block.is-planned-focus");
   assert.ok(card);
-  assert.match(card.textContent, /计 写报告/);
-  assert.match(card.textContent, /计划专注/);
-  assert.match(harness.els.timelineList.textContent, /10:00~10:25/);
+  assert.match(card.textContent, /写报告/);
 });
 
 test("in-memory previews and plans without adopted_at never render", () => {
@@ -207,8 +225,8 @@ test("damaged blocks are ignored and duplicate block ids render once", () => {
   const missingId = block("", "task-1", "无 ID", at(MONDAY, 13), at(MONDAY, 13, 25));
   const harness = createHarness({ state: baseState({ tasks: [{ id: "task-1" }], dailyPlans: { [MONDAY]: adoptedPlan(MONDAY, [valid, duplicate, invalid, missingId]) } }) });
   assert.deepEqual(plain(harness.api.getBlocks(MONDAY)).map((item) => item.title), ["有效"]);
-  harness.api.renderTimeline();
-  assert.equal(harness.document.querySelectorAll(".timeline-task-card.is-planned-focus").length, 1);
+  harness.api.renderWeekSchedule();
+  assert.equal(harness.document.querySelectorAll(".week-block.is-planned-focus").length, 1);
 });
 
 test("plans with damaged window metadata are ignored safely", () => {
@@ -217,7 +235,7 @@ test("plans with damaged window metadata are ignored safely", () => {
     window: { startAt: "broken", endAt: at(MONDAY, 22), planningStartAt: at(MONDAY, 7) },
   });
   const harness = createHarness({ state: baseState({ tasks: [{ id: "task-1" }], dailyPlans: { [MONDAY]: damagedPlan } }) });
-  assert.doesNotThrow(() => harness.api.renderTimeline());
+  assert.doesNotThrow(() => harness.api.renderWeekSchedule());
   assert.equal(harness.document.querySelectorAll(".is-planned-focus").length, 0);
 });
 
@@ -239,38 +257,36 @@ test("schedule rendering is read-only and never affects focus history or statist
 test("replaced adopted plans replace old schedule cards on rerender", () => {
   const state = baseState({ tasks: [{ id: "task-1" }], dailyPlans: { [MONDAY]: adoptedPlan(MONDAY, [block("old", "task-1", "旧块", at(MONDAY, 10), at(MONDAY, 10, 25))]) } });
   const harness = createHarness({ state });
-  harness.api.renderTimeline();
-  assert.match(harness.els.timelineList.textContent, /旧块/);
+  harness.api.renderWeekSchedule();
+  assert.match(harness.els.weekBoard.textContent, /旧块/);
   state.dailyPlans[MONDAY] = adoptedPlan(MONDAY, [block("new", "task-1", "新块", at(MONDAY, 11), at(MONDAY, 11, 25))]);
-  harness.api.renderTimeline();
-  assert.doesNotMatch(harness.els.timelineList.textContent, /旧块/);
-  assert.match(harness.els.timelineList.textContent, /新块/);
+  harness.api.renderWeekSchedule();
+  assert.doesNotMatch(harness.els.weekBoard.textContent, /旧块/);
+  assert.match(harness.els.weekBoard.textContent, /新块/);
 });
 
 test("cleaned task references disappear while orphaned legacy blocks remain safe", () => {
   const state = baseState({ dailyPlans: { [MONDAY]: adoptedPlan(MONDAY, []) } });
   const harness = createHarness({ state });
-  harness.api.renderTimeline();
+  harness.api.renderWeekSchedule();
   assert.equal(harness.document.querySelectorAll(".is-planned-focus").length, 0);
 
   state.dailyPlans[MONDAY] = adoptedPlan(MONDAY, [block("orphan", "missing-task", "保存的旧标题", at(MONDAY, 10), at(MONDAY, 10, 25))]);
-  harness.api.renderTimeline();
-  assert.match(harness.els.timelineList.textContent, /保存的旧标题/);
-  assert.match(harness.els.timelineList.textContent, /原任务已删除/);
+  harness.api.renderWeekSchedule();
+  assert.match(harness.els.weekBoard.textContent, /保存的旧标题/);
+  assert.match(harness.els.weekBoard.textContent, /原任务已删除/);
 });
 
 test("HTML-like block titles render only as text", () => {
   const title = '<img src=x onerror="alert(1)">';
   const state = baseState({ tasks: [{ id: "task-1" }], dailyPlans: { [MONDAY]: adoptedPlan(MONDAY, [block("html", "task-1", title, at(MONDAY, 10), at(MONDAY, 10, 25))]) } });
   const harness = createHarness({ state });
-  harness.api.renderTimeline();
   harness.api.renderWeekSchedule();
-  assert.equal(harness.document.querySelector("#timelineList img"), null);
   assert.equal(harness.document.querySelector("#weekBoard img"), null);
-  assert.match(harness.els.timelineList.textContent, /<img src=x/);
+  assert.match(harness.els.weekBoard.textContent, /<img src=x/);
 });
 
-test("tasks, courses and completed focus records still render beside planned focus", () => {
+test("planned entities stay in the week schedule while the actual timeline remains activity-only", () => {
   const state = baseState({
     tasks: [{ id: "task", title: "普通任务", startAt: at(MONDAY, 8), endAt: at(MONDAY, 8, 30), done: false, color: "sage" }],
     courses: [{ id: "course", title: "课程", startAt: at(MONDAY, 9), endAt: at(MONDAY, 9, 30), color: "sky" }],
@@ -279,18 +295,20 @@ test("tasks, courses and completed focus records still render beside planned foc
   });
   const harness = createHarness({ state });
   harness.api.renderTimeline();
-  assert.match(harness.els.timelineList.textContent, /普通任务/);
-  assert.match(harness.els.timelineList.textContent, /课程/);
-  assert.match(harness.els.timelineList.textContent, /完成一次专注/);
-  assert.match(harness.els.timelineList.textContent, /计划专注块/);
+  assert.match(harness.els.timelineList.textContent, /还没有实际活动记录/);
+  assert.doesNotMatch(harness.els.timelineList.textContent, /普通任务|课程|计划专注块/);
+  harness.api.renderWeekSchedule();
+  assert.match(harness.els.weekBoard.textContent, /普通任务/);
+  assert.match(harness.els.weekBoard.textContent, /课程/);
+  assert.match(harness.els.weekBoard.textContent, /计划专注块/);
   assert.equal(state.focusSessions.length, 1);
 });
 
 test("planned focus details reuse eventSheet without task deletion actions", () => {
   const state = baseState({ tasks: [{ id: "task-1" }], dailyPlans: { [MONDAY]: adoptedPlan(MONDAY, [block("detail", "task-1", "详情块", at(MONDAY, 10), at(MONDAY, 10, 25))]) } });
   const harness = createHarness({ state });
-  harness.api.renderTimeline();
-  harness.document.querySelector(".timeline-task-card.is-planned-focus").click();
+  harness.api.renderWeekSchedule();
+  harness.document.querySelector(".week-block.is-planned-focus").click();
   assert.equal(harness.els.eventSheetType.textContent, "PLAN");
   assert.equal(harness.els.eventSheetTitle.textContent, "详情块");
   assert.match(harness.els.eventSheetDescription.textContent, /来源：今日编排/);
@@ -302,8 +320,8 @@ test("planned focus details reuse eventSheet without task deletion actions", () 
 test("a fresh page harness restores planned focus solely from persisted dailyPlans", () => {
   const persisted = baseState({ tasks: [{ id: "task-1" }], dailyPlans: { [MONDAY]: adoptedPlan(MONDAY, [block("persisted", "task-1", "已恢复", at(MONDAY, 10), at(MONDAY, 10, 25))]) } });
   const harness = createHarness({ state: JSON.parse(JSON.stringify(persisted)) });
-  harness.api.renderTimeline();
-  assert.match(harness.els.timelineList.textContent, /已恢复/);
+  harness.api.renderWeekSchedule();
+  assert.match(harness.els.weekBoard.textContent, /已恢复/);
 });
 
 test("version 2 plans render more than three adopted sprint blocks", () => {
@@ -317,8 +335,6 @@ test("version 2 plans render more than three adopted sprint blocks", () => {
   ));
   const plan = adoptedPlan(MONDAY, sprintBlocks, { version: 2, mode: "deadline-sprint", focusTargetMinutes: 45 });
   const harness = createHarness({ state: baseState({ tasks: [{ id: "task-1" }], dailyPlans: { [MONDAY]: plan } }) });
-  harness.api.renderTimeline();
-  assert.equal(harness.document.querySelectorAll(".timeline-task-card.is-planned-focus").length, 5);
   harness.api.renderWeekSchedule();
   assert.equal(harness.document.querySelectorAll(".week-block.is-planned-focus").length, 5);
 });

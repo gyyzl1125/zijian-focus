@@ -200,10 +200,9 @@ test("whole-state merge is stable and does not mutate either device state", () =
   assert.equal(first.activitySessions.filter((item) => item.status === "running").length, 1);
 });
 
-test("this phase adds no activity rendering or UI event handlers", () => {
-  const timelineStart = source.indexOf("function renderTimeline");
-  const timelineEnd = source.indexOf("function layoutOverlappingEvents", timelineStart);
-  const timelineSource = source.slice(timelineStart, timelineEnd);
-  assert.doesNotMatch(timelineSource, /activitySessions|activeActivitySessionId/);
-  assert.doesNotMatch(source, /startTaskActivity\s*\(|completeActivitySession\s*\(/);
+test("the activity data module remains independent from the timeline UI", () => {
+  const moduleSource = fs.readFileSync("activity-sessions.js", "utf8");
+  assert.doesNotMatch(moduleSource, /\bdocument\b|localStorage|saveState\s*\(/);
+  assert.match(source, /ActivitySessions\.startTaskActivity|activityApi\.startTaskActivity/);
+  assert.match(source, /ActivitySessions\.completeActivitySession|activityApi\.completeActivitySession/);
 });

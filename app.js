@@ -184,6 +184,15 @@ const els = {
   timelineDateTitle: document.querySelector("#timelineDateTitle"),
   timelineStats: document.querySelector("#timelineStats"),
   timelineList: document.querySelector("#timelineList"),
+  timelineTaskSelect: document.querySelector("#timelineTaskSelect"),
+  timelineStartButton: document.querySelector("#timelineStartButton"),
+  timelineTaskEmpty: document.querySelector("#timelineTaskEmpty"),
+  timelineRunningCard: document.querySelector("#timelineRunningCard"),
+  timelineRunningTitle: document.querySelector("#timelineRunningTitle"),
+  timelineRunningStarted: document.querySelector("#timelineRunningStarted"),
+  timelineRunningElapsed: document.querySelector("#timelineRunningElapsed"),
+  timelineEndButton: document.querySelector("#timelineEndButton"),
+  timelineActivityStatus: document.querySelector("#timelineActivityStatus"),
   weekBoard: document.querySelector("#weekBoard"),
   weekDayHeaders: document.querySelector("#weekDayHeaders"),
   weekRangeTitle: document.querySelector("#weekRangeTitle"),
@@ -1924,13 +1933,201 @@ function renderTasks() {
   }
 }
 
-function renderTimeline() {
+function getActivitySessionsForTimelineDay(sessions, dayKeyValue) {
+  const dayStart = new Date(`${dayKeyValue}T00:00:00`).getTime();
+  const dayEndDate = new Date(dayStart);
+  dayEndDate.setDate(dayEndDate.getDate() + 1);
+  const dayEnd = dayEndDate.getTime();
+  if (!Number.isFinite(dayStart) || !Array.isArray(sessions)) return [];
+  return sessions
+    .filter((session) => session?.status === "completed"
+      && Number.isFinite(Number(session.startAt))
+      && Number.isFinite(Number(session.endAt))
+      && Number(session.startAt) < dayEnd
+      && Number(session.endAt) > dayStart)
+    .map((session) => {
+      const displayStartAt = Math.max(dayStart, Number(session.startAt));
+      const displayEndAt = Math.min(dayEnd, Number(session.endAt));
+      return {
+        ...session,
+        displayStartAt,
+        displayEndAt,
+        displayMinutes: Math.max(1, Math.round((displayEndAt - displayStartAt) / 60000)),
+      };
+    })
+    .sort((left, right) => left.displayStartAt - right.displayStartAt
+      || left.displayEndAt - right.displayEndAt
+      || String(left.id).localeCompare(String(right.id)));
+}
+
+function formatActivityElapsed(milliseconds) {
+  const totalSeconds = Math.max(0, Math.floor(Number(milliseconds || 0) / 1000));
+  if (totalSeconds < 60) return `${totalSeconds}秒`;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return hours > 0 ? `${hours}小时${minutes}分钟` : `${totalMinutes}分钟`;
+}
+
+function renderTimelineTaskPicker() {
+  if (!els.timelineTaskSelect || !els.timelineStartButton) return;
+  const previousValue = els.timelineTaskSelect.value;
+  const tasks = (state.tasks || [])
+    .filter((task) => task && !task.done && String(task.id || "").trim())
+    .slice()
+    .sort((left, right) => Number(left.endAt || 0) - Number(right.endAt || 0)
+      || String(left.title || "").localeCompare(String(right.title || ""))
+      || String(left.id).localeCompare(String(right.id)));
+  els.timelineTaskSelect.replaceChildren();
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = tasks.length > 0 ? "选择一个未完成任务" : "暂无未完成任务";
+  els.timelineTaskSelect.append(placeholder);
+  tasks.forEach((task) => {
+    const option = document.createElement("option");
+    option.value = String(task.id);
+    option.textContent = String(task.title || "未命名任务");
+    els.timelineTaskSelect.append(option);
+  });
+  els.timelineTaskSelect.value = tasks.some((task) => String(task.id) === previousValue) ? previousValue : "";
+  const canStart = Boolean(els.timelineTaskSelect.value);
+  els.timelineStartButton.disabled = !canStart;
+  els.timelineStartButton.setAttribute("aria-disabled", String(!canStart));
+  if (els.timelineTaskEmpty) els.timelineTaskEmpty.hidden = tasks.length > 0;
+}
+
+function renderRunningActivity(now = Date.now()) {
+  if (!els.timelineRunningCard) return;
+  const activityApi = globalThis.ActivitySessions;
+  const running = activityApi?.getRunningActivitySession?.(
+    state.activitySessions,
+    state.activeActivitySessionId
+  );
+  els.timelineRunningCard.hidden = !running;
+  if (!running) return;
+  els.timelineRunningTitle.textContent = String(running.title || "未命名任务");
+  els.timelineRunningStarted.textContent = `开始于 ${formatClock(running.startAt)}`;
+  els.timelineRunningElapsed.textContent = `已持续 ${formatActivityElapsed(Number(now) - running.startAt)}`;
+}
+
+function applyActivityUiResult(result, successTitle, successBody) {
+  if (!result?.ok || !result.changed) return false;
+  const previousSessions = state.activitySessions;
+  const previousActiveId = state.activeActivitySessionId;
+  const previousSyncUpdatedAt = state.syncUpdatedAt;
+  try {
+    state.activitySessions = result.sessions;
+    state.activeActivitySessionId = result.activeActivitySessionId;
+    const saved = saveState();
+    if (saved === false) throw new Error("saveState returned false");
+    renderTimeline();
+    if (els.timelineActivityStatus) els.timelineActivityStatus.textContent = successTitle;
+    showReminderToast(successTitle, successBody);
+    return true;
+  } catch (error) {
+    console.error("Activity session save failed:", error);
+    state.activitySessions = previousSessions;
+    state.activeActivitySessionId = previousActiveId;
+    state.syncUpdatedAt = previousSyncUpdatedAt;
+    renderTimeline();
+    showReminderToast("保存失败", "实际活动记录没有保存，请稍后重试。");
+    return false;
+  }
+}
+
+function startSelectedTaskActivity(now = Date.now()) {
+  const activityApi = globalThis.ActivitySessions;
+  const taskId = String(els.timelineTaskSelect?.value || "");
+  const task = (state.tasks || []).find((item) => String(item?.id) === taskId && !item.done);
+  if (!activityApi || !task) {
+    renderTimelineTaskPicker();
+    showReminderToast("无法开始任务", "请选择一个仍未完成的任务。");
+    return false;
+  }
+  const running = activityApi.getRunningActivitySession(state.activitySessions, state.activeActivitySessionId);
+  let result;
+  if (!running) {
+    result = activityApi.startTaskActivity({
+      sessions: state.activitySessions,
+      activeActivitySessionId: state.activeActivitySessionId,
+      task,
+      now,
+      idFactory: () => crypto.randomUUID(),
+    });
+  } else {
+    const shouldSwitch = confirm(`当前正在进行“${running.title}”，是否结束当前任务并切换到“${task.title}”？`);
+    if (!shouldSwitch) return false;
+    const isShort = Number(now) - Number(running.startAt) < 60000;
+    const keepShort = !isShort || confirm("当前活动不足 1 分钟，是否保留这条实际记录？");
+    if (keepShort) {
+      result = activityApi.switchTaskActivity({
+        sessions: state.activitySessions,
+        activeActivitySessionId: state.activeActivitySessionId,
+        task,
+        now,
+        idFactory: () => crypto.randomUUID(),
+      });
+    } else {
+      const cancelled = activityApi.cancelActivitySession({
+        sessions: state.activitySessions,
+        activeActivitySessionId: state.activeActivitySessionId,
+        now,
+      });
+      result = cancelled.ok ? activityApi.startTaskActivity({
+        sessions: cancelled.sessions,
+        activeActivitySessionId: null,
+        task,
+        now,
+        idFactory: () => crypto.randomUUID(),
+      }) : cancelled;
+    }
+  }
+  if (!result?.ok) {
+    showReminderToast("无法开始任务", "活动状态已经变化，请刷新后重试。");
+    return false;
+  }
+  return applyActivityUiResult(result, "任务已开始", `正在记录“${task.title}”。`);
+}
+
+function endCurrentTaskActivity(now = Date.now()) {
+  const activityApi = globalThis.ActivitySessions;
+  if (!activityApi) return false;
+  const completed = activityApi.completeActivitySession({
+    sessions: state.activitySessions,
+    activeActivitySessionId: state.activeActivitySessionId,
+    now,
+  });
+  if (!completed.ok) {
+    renderTimeline();
+    showReminderToast("没有进行中的任务", "当前没有需要结束的实际活动。");
+    return false;
+  }
+  let result = completed;
+  let kept = true;
+  if (completed.shortSession) {
+    kept = confirm("本次活动不足 1 分钟，是否保留这条实际记录？");
+    if (!kept) {
+      result = activityApi.cancelActivitySession({
+        sessions: state.activitySessions,
+        activeActivitySessionId: state.activeActivitySessionId,
+        now,
+      });
+    }
+  }
+  return applyActivityUiResult(
+    result,
+    kept ? "实际记录已保存" : "短记录未保留",
+    kept ? `已记录“${completed.session.title}”。` : "本次活动已结束，但不会进入实际时间轴。"
+  );
+}
+
+function renderTimeline(now = Date.now()) {
   const labels = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
   const selectedDate = new Date(`${selectedTimelineDate}T00:00:00`);
   const weekStart = getWeekStart(selectedDate);
   const todayKey = dateKey();
 
-  els.weekStrip.innerHTML = "";
+  els.weekStrip.replaceChildren();
   for (let index = 0; index < 7; index += 1) {
     const day = new Date(weekStart);
     day.setDate(weekStart.getDate() + index);
@@ -1940,17 +2137,11 @@ function renderTimeline() {
     button.className = "week-day";
     button.classList.toggle("is-selected", key === selectedTimelineDate);
     button.classList.toggle("is-today", key === todayKey);
+    button.setAttribute("aria-pressed", String(key === selectedTimelineDate));
     const label = document.createElement("span");
     label.textContent = labels[index];
     const number = document.createElement("strong");
     number.textContent = String(day.getDate());
-    const ddlCount = state.tasks.filter((task) => !task.done && dateKey(new Date(task.endAt)) === key).length;
-    if (ddlCount > 0) {
-      const badge = document.createElement("em");
-      badge.className = "ddl-count";
-      badge.textContent = ddlCount;
-      button.append(badge);
-    }
     button.append(label, number);
     button.addEventListener("click", () => {
       selectedTimelineDate = key;
@@ -1959,81 +2150,50 @@ function renderTimeline() {
     els.weekStrip.append(button);
   }
 
-  const dayTasks = state.tasks
-    .filter((task) => dateKey(new Date(task.startAt)) === selectedTimelineDate)
-    .sort((a, b) => a.startAt - b.startAt);
-  const dayCourses = getDayCourses(selectedTimelineDate)
-    .map((course) => ({ ...course, type: "course", color: "sky", done: false }));
-  const dayFocus = (state.focusSessions || [])
-    .filter((session) => dateKey(new Date(session.startAt)) === selectedTimelineDate)
-    .map((session) => ({ ...session, type: "focus", color: "lemon", done: true }));
-  const dayPlannedFocus = getAdoptedFocusBlocksForDay(selectedTimelineDate);
-  const timelineItems = [
-    ...dayTasks.map((task) => ({ ...task, type: "task" })),
-    ...dayCourses,
-    ...dayFocus,
-    ...dayPlannedFocus,
-  ].sort((a, b) => a.startAt - b.startAt);
-  const totalMinutes = timelineItems.reduce((sum, item) => sum + Math.max(1, Math.round((item.endAt - item.startAt) / 60000)), 0);
+  renderTimelineTaskPicker();
+  renderRunningActivity(now);
+  const timelineItems = getActivitySessionsForTimelineDay(state.activitySessions, selectedTimelineDate);
+  const totalMinutes = timelineItems.reduce((sum, item) => sum + item.displayMinutes, 0);
   const month = selectedDate.getMonth() + 1;
   const day = selectedDate.getDate();
   const weekday = labels[(selectedDate.getDay() || 7) - 1];
   els.timelineDateTitle.textContent = `${month}月${day}日 ${weekday}`;
-  els.timelineStats.textContent = `${timelineItems.length}次 · ${totalMinutes === 0 ? "0分钟" : formatDuration(0, totalMinutes * 60000)}`;
+  els.timelineStats.textContent = `${timelineItems.length}次 · ${totalMinutes}分钟`;
 
-  els.timelineList.innerHTML = "";
+  els.timelineList.replaceChildren();
   if (timelineItems.length === 0) {
     const empty = document.createElement("li");
     empty.className = "timeline-empty";
-    empty.textContent = "这一天还没有安排。";
+    empty.textContent = "这一天还没有实际活动记录。";
     els.timelineList.append(empty);
     return;
   }
 
-  for (const entry of timelineItems) {
+  timelineItems.forEach((entry) => {
     const color = getTaskColor(entry.color);
     const item = document.createElement("li");
-    const itemState = entry.type === "focus" || entry.type === "course"
-      ? "done"
-      : entry.type === "planned-focus" ? "planned" : getTaskStatus(entry);
-    item.className = `timeline-item is-${itemState}`;
+    item.className = "timeline-item is-done";
     item.style.setProperty("--task-bg", color.bg);
     item.style.setProperty("--task-border", color.border);
     item.style.setProperty("--task-ink", color.ink);
-
     const time = document.createElement("div");
     time.className = "timeline-time";
     const timeRange = document.createElement("strong");
-    timeRange.textContent = `${formatClock(entry.startAt)}~${formatClock(entry.endAt)}`;
+    timeRange.textContent = `${formatClock(entry.displayStartAt)}~${formatClock(entry.displayEndAt)}`;
     const durationText = document.createElement("span");
-    durationText.textContent = formatDuration(entry.startAt, entry.endAt);
+    durationText.textContent = `${entry.displayMinutes}分钟`;
     time.append(timeRange, durationText);
-
-    const card = document.createElement(entry.type === "planned-focus" ? "button" : "div");
-    card.className = "timeline-task-card";
-    const icon = entry.type === "focus" ? "专" : entry.type === "planned-focus" ? "计" : entry.type === "course" ? "课" : entry.done ? "✓" : "◦";
-    const meta = entry.type === "focus"
-      ? "完成一次专注"
-      : entry.type === "planned-focus"
-        ? `计划专注${entry.orphaned ? " · 原任务已删除" : ""}`
-      : entry.type === "course"
-        ? (entry.location || "课程安排")
-        : entry.done ? "已完成" : "进行计划中";
-    const cardTitle = document.createElement("strong");
-    cardTitle.textContent = `${icon} ${entry.title}`;
-    const cardMeta = document.createElement("span");
-    cardMeta.textContent = meta;
-    card.append(cardTitle, cardMeta);
-    if (entry.type === "planned-focus") {
-      card.type = "button";
-      card.classList.add("is-planned-focus");
-      card.setAttribute("aria-label", `计划专注 ${entry.title}，${formatClock(entry.startAt)} 到 ${formatClock(entry.endAt)}`);
-      card.addEventListener("click", () => showEventDetail(entry));
-    }
-
+    const card = document.createElement("div");
+    card.className = "timeline-task-card is-actual-activity";
+    const title = document.createElement("strong");
+    title.textContent = String(entry.title || "未命名任务");
+    const taskExists = (state.tasks || []).some((task) => String(task?.id) === String(entry.taskId));
+    const meta = document.createElement("span");
+    meta.textContent = taskExists ? "实际活动" : "实际活动 · 原任务已删除";
+    card.append(title, meta);
     item.append(time, card);
     els.timelineList.append(item);
-  }
+  });
 }
 
 function layoutOverlappingEvents(events) {
@@ -5461,6 +5621,13 @@ function setActiveView(viewName) {
 }
 
 els.startPauseButton.addEventListener("click", () => state.isRunning ? pauseTimer() : startTimer());
+els.timelineTaskSelect?.addEventListener("change", () => {
+  const canStart = Boolean(els.timelineTaskSelect.value);
+  els.timelineStartButton.disabled = !canStart;
+  els.timelineStartButton.setAttribute("aria-disabled", String(!canStart));
+});
+els.timelineStartButton?.addEventListener("click", () => startSelectedTaskActivity(Date.now()));
+els.timelineEndButton?.addEventListener("click", () => endCurrentTaskActivity(Date.now()));
 els.dailyPlanGenerateButton.addEventListener("click", () => generateDailyPlanPreview(Date.now()));
 els.dailyPlanAdoptButton.addEventListener("click", () => adoptDailyPlanPreview(Date.now()));
 els.dailyPlanBalancedModeButton?.addEventListener("click", () => setDailyPlanMode("balanced", Date.now()));
@@ -5853,3 +6020,6 @@ window.setInterval(() => {
   checkReminders();
   renderTasks();
 }, 30000);
+window.setInterval(() => {
+  if (activeView === "timeline") renderRunningActivity(Date.now());
+}, 1000);

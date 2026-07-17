@@ -208,7 +208,29 @@
 
       <section class="app-view" id="timelineView" data-view="timeline" aria-label="时间轴">
         <section class="timeline-card">
-          <div class="week-strip" id="weekStrip"></div>
+          <div class="week-strip" id="weekStrip" aria-label="选择实际记录日期"></div>
+          <section class="timeline-activity-control" aria-label="任务活动记录">
+            <div class="timeline-start-row">
+              <label for="timelineTaskSelect">开始任务</label>
+              <select id="timelineTaskSelect">
+                <option value="">选择一个未完成任务</option>
+              </select>
+              <button id="timelineStartButton" type="button" disabled aria-disabled="true">开始</button>
+            </div>
+            <p class="timeline-task-empty" id="timelineTaskEmpty" hidden>当前没有可开始的未完成任务。</p>
+            <article class="timeline-running-card" id="timelineRunningCard" hidden aria-live="polite">
+              <div>
+                <span>正在进行</span>
+                <strong id="timelineRunningTitle"></strong>
+                <small id="timelineRunningStarted"></small>
+              </div>
+              <div class="timeline-running-actions">
+                <strong id="timelineRunningElapsed">0分钟</strong>
+                <button id="timelineEndButton" type="button">结束</button>
+              </div>
+            </article>
+            <span class="visually-hidden" id="timelineActivityStatus" role="status" aria-live="polite"></span>
+          </section>
           <div class="timeline-summary">
             <div>
               <strong id="timelineDateTitle">今天</strong>
