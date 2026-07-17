@@ -39,16 +39,36 @@
               <div><p class="eyebrow">本地智能编排</p><h2>今日编排</h2></div>
               <span id="dailyPlanStatus" aria-live="polite">尚未生成</span>
             </div>
-            <div class="daily-plan-content" id="dailyPlanContent" aria-live="polite">
-              <div class="daily-plan-empty">
-                <strong>把散落的一天，轻轻排成可以完成的样子。</strong>
-                <p>本地读取任务、课程、DDL 与近期专注节奏，生成三个重点和合适的专注时段。</p>
+            <div class="daily-plan-mode" role="tablist" aria-label="今日编排模式">
+              <button id="dailyPlanBalancedModeButton" type="button" role="tab" aria-selected="true" aria-controls="dailyPlanBalancedPanel">均衡编排</button>
+              <button id="dailyPlanSprintModeButton" type="button" role="tab" aria-selected="false" aria-controls="deadlineSprintPanel">截止前冲刺</button>
+            </div>
+            <div id="dailyPlanBalancedPanel" role="tabpanel" aria-labelledby="dailyPlanBalancedModeButton">
+              <div class="daily-plan-content" id="dailyPlanContent" aria-live="polite">
+                <div class="daily-plan-empty">
+                  <strong>把散落的一天，轻轻排成可以完成的样子。</strong>
+                  <p>本地读取任务、课程、DDL 与近期专注节奏，生成三个重点和合适的专注时段。</p>
+                </div>
+              </div>
+              <div class="daily-plan-actions">
+                <button class="daily-plan-generate" id="dailyPlanGenerateButton" type="button" aria-controls="dailyPlanContent" aria-disabled="false">为我编排今天</button>
+                <button class="daily-plan-adopt" id="dailyPlanAdoptButton" type="button" disabled hidden aria-disabled="true">采用到日程</button>
+                <span class="daily-plan-next-stage" id="dailyPlanNextStage" aria-live="polite" hidden></span>
               </div>
             </div>
-            <div class="daily-plan-actions">
-              <button class="daily-plan-generate" id="dailyPlanGenerateButton" type="button" aria-controls="dailyPlanContent" aria-disabled="false">为我编排今天</button>
-              <button class="daily-plan-adopt" id="dailyPlanAdoptButton" type="button" disabled hidden aria-disabled="true">采用到日程</button>
-              <span class="daily-plan-next-stage" id="dailyPlanNextStage" aria-live="polite" hidden></span>
+            <div class="deadline-sprint-panel" id="deadlineSprintPanel" role="tabpanel" aria-labelledby="dailyPlanSprintModeButton" hidden>
+              <label class="deadline-sprint-task-field" for="deadlineSprintTaskSelect">
+                <span>选择冲刺任务</span>
+                <select id="deadlineSprintTaskSelect">
+                  <option value="">请选择具有未来截止时间的任务</option>
+                </select>
+              </label>
+              <p class="deadline-sprint-task-meta" id="deadlineSprintTaskMeta" aria-live="polite"></p>
+              <button class="deadline-sprint-generate" id="deadlineSprintGenerateButton" type="button" disabled aria-disabled="true" aria-controls="deadlineSprintContent">生成冲刺时段</button>
+              <div class="deadline-sprint-content" id="deadlineSprintContent" aria-live="polite"></div>
+              <div class="deadline-sprint-selection" id="deadlineSprintSelection" aria-live="polite" hidden></div>
+              <button class="daily-plan-adopt deadline-sprint-adopt" id="deadlineSprintAdoptButton" type="button" disabled aria-disabled="true">采用到日程</button>
+              <p class="deadline-sprint-next-stage">采用到日程将在下一阶段开放</p>
             </div>
           </article>
           <article class="next-card">

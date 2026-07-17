@@ -235,6 +235,11 @@ body {
 .daily-plan-head h2, .daily-plan-head p { margin: 0; }
 .daily-plan-head h2 { margin-top: 2px; font-size: 1.25rem; }
 .daily-plan-head > span { padding: 6px 9px; border-radius: 999px; background: color-mix(in srgb, var(--primary), transparent 86%); color: var(--muted); font-size: .68rem; font-weight: 850; white-space: nowrap; }
+.daily-plan-mode { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; padding: 4px; border-radius: 16px; background: color-mix(in srgb, var(--ink), transparent 92%); }
+.daily-plan-mode button { min-width: 0; min-height: 38px; padding: 8px 10px; border: 0; border-radius: 12px; background: transparent; color: var(--muted); font-size: .76rem; font-weight: 900; }
+.daily-plan-mode button[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 3px 10px color-mix(in srgb, var(--ink), transparent 90%); }
+#dailyPlanBalancedPanel { display: grid; gap: 14px; min-width: 0; }
+#dailyPlanBalancedPanel[hidden] { display: none; }
 .daily-plan-content { display: grid; gap: 12px; }
 .daily-plan-empty { display: grid; gap: 5px; padding: 15px; border-radius: 18px; background: color-mix(in srgb, var(--surface), transparent 8%); }
 .daily-plan-empty p { margin: 0; color: var(--muted); font-size: .8rem; line-height: 1.55; }
@@ -275,6 +280,32 @@ body {
 .daily-plan-next-stage { grid-column: 1 / -1; align-self: center; color: var(--muted); font-size: .7rem; line-height: 1.35; }
 .daily-plan-generate:disabled { cursor: wait; opacity: .68; }
 .daily-plan-error p { color: #934343; }
+.deadline-sprint-panel { display: grid; min-width: 0; gap: 10px; }
+.deadline-sprint-panel[hidden] { display: none; }
+.deadline-sprint-task-field { display: grid; min-width: 0; gap: 6px; color: var(--ink); font-size: .74rem; font-weight: 900; }
+.deadline-sprint-task-field select { width: 100%; min-width: 0; min-height: 44px; padding: 9px 34px 9px 11px; border: 1px solid color-mix(in srgb, var(--primary), transparent 68%); border-radius: 14px; background: var(--surface); color: var(--ink); text-overflow: ellipsis; }
+.deadline-sprint-task-meta { min-width: 0; margin: -2px 0 0; color: var(--muted); font-size: .72rem; line-height: 1.45; overflow-wrap: anywhere; }
+.deadline-sprint-generate { min-height: 44px; border: 0; border-radius: 14px; background: var(--ink); color: var(--surface); font-weight: 900; }
+.deadline-sprint-generate:disabled { cursor: wait; opacity: .62; }
+.deadline-sprint-content { display: grid; min-width: 0; gap: 10px; }
+.deadline-sprint-summary { display: flex; min-width: 0; align-items: start; justify-content: space-between; gap: 10px; }
+.deadline-sprint-summary strong { font-size: .84rem; }
+.deadline-sprint-summary span { color: var(--muted); font-size: .7rem; text-align: right; overflow-wrap: anywhere; }
+.deadline-sprint-candidates { display: grid; min-width: 0; gap: 8px; }
+.deadline-sprint-candidate { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: center; min-width: 0; padding: 11px; border: 1px solid color-mix(in srgb, var(--primary), transparent 72%); border-radius: 15px; background: var(--surface); cursor: pointer; }
+.deadline-sprint-candidate:has(input:checked) { border-color: color-mix(in srgb, var(--primary), transparent 30%); background: color-mix(in srgb, var(--primary), var(--surface) 94%); }
+.deadline-sprint-candidate input { width: 19px; height: 19px; margin: 0; accent-color: var(--primary); }
+.deadline-sprint-candidate > span { display: grid; min-width: 0; gap: 2px; }
+.deadline-sprint-candidate strong, .deadline-sprint-candidate span, .deadline-sprint-candidate small { min-width: 0; overflow-wrap: anywhere; }
+.deadline-sprint-candidate strong { font-size: .78rem; }
+.deadline-sprint-candidate > span > span { color: var(--primary); font-size: .72rem; font-weight: 850; }
+.deadline-sprint-candidate small { color: var(--muted); font-size: .68rem; }
+.deadline-sprint-selection { display: grid; min-width: 0; gap: 3px; padding: 11px; border-radius: 14px; background: color-mix(in srgb, var(--primary), var(--surface) 92%); }
+.deadline-sprint-selection strong { font-size: .76rem; overflow-wrap: anywhere; }
+.deadline-sprint-selection span { color: var(--muted); font-size: .68rem; }
+.deadline-sprint-selection p { margin: 4px 0 0; color: #946321; font-size: .7rem; line-height: 1.45; }
+.deadline-sprint-adopt { width: 100%; }
+.deadline-sprint-next-stage { margin: -4px 0 0; color: var(--muted); font-size: .68rem; text-align: center; }
 
 .metric-card {
   display: flex;

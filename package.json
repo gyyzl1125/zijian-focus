@@ -13,6 +13,7 @@
     "test:memo-deletion": "node --test tests/memo-deletion.test.cjs",
     "test:planner-schedule": "node --test tests/planner-schedule.test.cjs",
     "test:deadline-sprint": "node --test tests/deadline-sprint.test.cjs",
+    "test:deadline-sprint-dom": "node --test tests/deadline-sprint-dom.test.cjs",
     "test:web-assets": "node --test tests/web-assets.test.cjs",
     "web:prepare": "node scripts/prepare-web.cjs prepare",
     "web:check": "node scripts/prepare-web.cjs check",

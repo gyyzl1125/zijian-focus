@@ -119,6 +119,12 @@ let dailyPlanGenerating = false;
 let dailyPlanAdopting = false;
 let dailyPlanAdoptionError = null;
 let dailyPlanPreviewNeedsRegeneration = false;
+let dailyPlanMode = "balanced";
+let deadlineSprintPreview = null;
+let deadlineSprintSelectedIds = new Set();
+let deadlineSprintTaskId = null;
+let deadlineSprintGenerating = false;
+let deadlineSprintError = null;
 
 const els = {
   scene: document.querySelector("#scene"),
@@ -265,6 +271,16 @@ const els = {
   dailyPlanGenerateButton: document.querySelector("#dailyPlanGenerateButton"),
   dailyPlanAdoptButton: document.querySelector("#dailyPlanAdoptButton"),
   dailyPlanNextStage: document.querySelector("#dailyPlanNextStage"),
+  dailyPlanBalancedModeButton: document.querySelector("#dailyPlanBalancedModeButton"),
+  dailyPlanSprintModeButton: document.querySelector("#dailyPlanSprintModeButton"),
+  dailyPlanBalancedPanel: document.querySelector("#dailyPlanBalancedPanel"),
+  deadlineSprintPanel: document.querySelector("#deadlineSprintPanel"),
+  deadlineSprintTaskSelect: document.querySelector("#deadlineSprintTaskSelect"),
+  deadlineSprintTaskMeta: document.querySelector("#deadlineSprintTaskMeta"),
+  deadlineSprintGenerateButton: document.querySelector("#deadlineSprintGenerateButton"),
+  deadlineSprintContent: document.querySelector("#deadlineSprintContent"),
+  deadlineSprintSelection: document.querySelector("#deadlineSprintSelection"),
+  deadlineSprintAdoptButton: document.querySelector("#deadlineSprintAdoptButton"),
   profileFlames: document.querySelector("#profileFlames"),
   usagePermissionCard: document.querySelector("#usagePermissionCard"),
   usagePermissionButton: document.querySelector("#usagePermissionButton"),
@@ -3769,6 +3785,332 @@ function getDailyPlanPreviewInput(now) {
   return { now: timestamp, tasks, courses, focusSessions, fixedTaskIds };
 }
 
+function getDeadlineSprintEligibleTasks(now) {
+  const timestamp = Number(now);
+  const planner = globalThis.DailyPlanner;
+  if (!Number.isFinite(timestamp) || !planner || typeof planner.getTaskDeadlineAt !== "function") return [];
+  return (Array.isArray(state.tasks) ? state.tasks : [])
+    .filter((task) => task && task.done !== true)
+    .map((task) => ({ task, deadlineAt: planner.getTaskDeadlineAt(task, timestamp) }))
+    .filter(({ deadlineAt }) => Number.isFinite(deadlineAt))
+    .sort((a, b) => a.deadlineAt - b.deadlineAt
+      || String(a.task.title || "").localeCompare(String(b.task.title || ""))
+      || String(a.task.id || "").localeCompare(String(b.task.id || "")));
+}
+
+function deadlineSprintRemainingText(deadlineAt, now) {
+  const minutes = Math.max(0, Math.ceil((Number(deadlineAt) - Number(now)) / 60000));
+  const days = Math.floor(minutes / (24 * 60));
+  const hours = Math.floor((minutes % (24 * 60)) / 60);
+  const remainder = minutes % 60;
+  if (days > 0) return `${days} 天 ${hours} 小时`;
+  if (hours > 0) return `${hours} 小时 ${remainder} 分钟`;
+  return `${remainder} 分钟`;
+}
+
+function deadlineSprintDateTime(timestamp) {
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(timestamp));
+}
+
+function resetDeadlineSprintMemory(clearTask = false) {
+  deadlineSprintPreview = null;
+  deadlineSprintSelectedIds = new Set();
+  deadlineSprintGenerating = false;
+  deadlineSprintError = null;
+  if (clearTask) deadlineSprintTaskId = null;
+}
+
+function getDeadlineSprintCandidateInput(now, taskId) {
+  const timestamp = Number(now);
+  if (!Number.isFinite(timestamp)) throw new TypeError("截止前冲刺需要有效的当前时间");
+  const planner = globalThis.DailyPlanner;
+  if (!planner || typeof planner.getTaskDeadlineAt !== "function"
+    || typeof planner.buildDeadlineSprintCandidates !== "function"
+    || typeof planner.isFixedTimeTask !== "function") {
+    throw new Error("本地冲刺编排引擎未加载");
+  }
+  const selectedTask = (Array.isArray(state.tasks) ? state.tasks : [])
+    .find((task) => String(task?.id) === String(taskId) && task?.done !== true);
+  if (!selectedTask) return null;
+  const deadlineAt = planner.getTaskDeadlineAt(selectedTask, timestamp);
+  const rangeEndAt = Number.isFinite(deadlineAt) ? deadlineAt : timestamp;
+  const courses = (Array.isArray(state.courses) ? state.courses : [])
+    .filter((course) => Number(course?.startAt) < rangeEndAt && Number(course?.endAt) > timestamp)
+    .map(cloneDailyPlanInputItem);
+  const fixedTasks = (Array.isArray(state.tasks) ? state.tasks : [])
+    .filter((task) => task && task.done !== true && planner.isFixedTimeTask(task)
+      && Number(task.startAt) < rangeEndAt && Number(task.endAt) > timestamp)
+    .map(cloneDailyPlanInputItem);
+  const adoptedBlocks = [];
+  const seenBlocks = new Set();
+  Object.keys(state.dailyPlans && typeof state.dailyPlans === "object" ? state.dailyPlans : {})
+    .sort()
+    .forEach((dayKeyValue) => {
+      const plan = getAdoptedDailyPlan(dayKeyValue);
+      if (!plan) return;
+      plan.blocks.forEach((block) => {
+        if (Number(block.startAt) >= rangeEndAt || Number(block.endAt) <= timestamp) return;
+        const identity = `${String(block.id)}:${Number(block.startAt)}:${Number(block.endAt)}`;
+        if (seenBlocks.has(identity)) return;
+        seenBlocks.add(identity);
+        adoptedBlocks.push(cloneDailyPlanInputItem(block));
+      });
+    });
+  return {
+    now: timestamp,
+    task: cloneDailyPlanInputItem(selectedTask),
+    deadlineAt,
+    courses,
+    fixedTasks,
+    adoptedBlocks,
+  };
+}
+
+function appendDeadlineSprintEmpty(titleText, bodyText, className = "") {
+  if (!els.deadlineSprintContent) return;
+  const empty = document.createElement("div");
+  empty.className = `daily-plan-empty deadline-sprint-empty${className ? ` ${className}` : ""}`;
+  const title = document.createElement("strong");
+  const body = document.createElement("p");
+  title.textContent = titleText;
+  body.textContent = bodyText;
+  empty.append(title, body);
+  els.deadlineSprintContent.append(empty);
+}
+
+function appendDeadlineSprintWarnings(warnings) {
+  if (!els.deadlineSprintContent || !Array.isArray(warnings) || warnings.length === 0) return;
+  const list = document.createElement("ul");
+  list.className = "daily-plan-warnings deadline-sprint-warnings";
+  warnings.forEach((warning) => {
+    const item = document.createElement("li");
+    item.className = "daily-plan-warning";
+    item.dataset.warningCode = String(warning?.code || "SPRINT_WARNING");
+    const label = document.createElement("strong");
+    const message = document.createElement("span");
+    label.textContent = warning?.severity === "error" ? "错误" : warning?.severity === "info" ? "提示" : "提醒";
+    message.textContent = String(warning?.message || "请检查当前冲刺安排");
+    item.append(label, message);
+    list.append(item);
+  });
+  els.deadlineSprintContent.append(list);
+}
+
+function deadlineSprintSelectionStats() {
+  const candidates = Array.isArray(deadlineSprintPreview?.candidates) ? deadlineSprintPreview.candidates : [];
+  const selected = candidates.filter((candidate) => deadlineSprintSelectedIds.has(String(candidate.id)));
+  const minutes = selected.reduce((sum, candidate) => sum + Math.max(0, Number(candidate.minutes) || 0), 0);
+  const days = new Set(selected.map((candidate) => dailyPlanDayKey(candidate.startAt))).size;
+  return {
+    count: selected.length,
+    minutes,
+    days,
+    intensityLevel: minutes <= 90 ? "low" : minutes <= 180 ? "moderate" : "high",
+  };
+}
+
+function renderDeadlineSprintCandidates() {
+  if (!els.deadlineSprintContent || !els.deadlineSprintSelection) return;
+  els.deadlineSprintContent.replaceChildren();
+  const candidates = Array.isArray(deadlineSprintPreview?.candidates)
+    ? deadlineSprintPreview.candidates.slice(0, 8)
+    : [];
+
+  if (deadlineSprintError) {
+    appendDeadlineSprintEmpty("暂时无法生成冲刺时段", deadlineSprintError, "daily-plan-error");
+  } else if (deadlineSprintGenerating) {
+    appendDeadlineSprintEmpty("正在寻找截止前的空闲时间…", "所有计算都在本机完成。", "deadline-sprint-loading");
+  } else if (!deadlineSprintPreview) {
+    appendDeadlineSprintEmpty("选择一个任务开始冲刺", "生成后可以逐个选择想采用的专注时段。");
+  } else {
+    const summary = document.createElement("div");
+    summary.className = "deadline-sprint-summary";
+    const title = document.createElement("strong");
+    const meta = document.createElement("span");
+    title.textContent = `${deadlineSprintPreview.candidateCount || candidates.length} 个候选时段`;
+    meta.textContent = `截止 ${deadlineSprintDateTime(deadlineSprintPreview.deadlineAt)} · 共 ${Number(deadlineSprintPreview.totalCandidateMinutes) || 0} 分钟`;
+    summary.append(title, meta);
+    els.deadlineSprintContent.append(summary);
+
+    if (candidates.length > 0) {
+      const list = document.createElement("div");
+      list.className = "deadline-sprint-candidates";
+      candidates.forEach((candidate) => {
+        const row = document.createElement("label");
+        row.className = "deadline-sprint-candidate";
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.value = String(candidate.id);
+        checkbox.checked = deadlineSprintSelectedIds.has(String(candidate.id));
+        checkbox.setAttribute("aria-label", `选择第 ${candidate.sequence} 轮，${deadlineSprintDateTime(candidate.startAt)}`);
+        checkbox.addEventListener("change", () => toggleDeadlineSprintCandidate(candidate.id, checkbox.checked));
+        const copy = document.createElement("span");
+        const heading = document.createElement("strong");
+        const timing = document.createElement("span");
+        const detail = document.createElement("small");
+        heading.textContent = `第 ${candidate.sequence} 轮 · ${String(deadlineSprintPreview.title || candidate.title || "冲刺任务")}`;
+        timing.textContent = `${deadlineSprintDateTime(candidate.startAt)}–${dailyPlanClock(candidate.endAt)}`;
+        detail.textContent = `${candidate.minutes} 分钟${Number(candidate.minutes) < Number(deadlineSprintPreview.focusMinutes) ? " · 灵活时段" : ""}`;
+        copy.append(heading, timing, detail);
+        row.append(checkbox, copy);
+        list.append(row);
+      });
+      els.deadlineSprintContent.append(list);
+    } else {
+      appendDeadlineSprintEmpty("没有可用的冲刺时段", "可以调整固定安排，或选择其他截止任务。");
+    }
+    appendDeadlineSprintWarnings(deadlineSprintPreview.warnings);
+  }
+
+  const stats = deadlineSprintSelectionStats();
+  els.deadlineSprintSelection.hidden = !deadlineSprintPreview;
+  els.deadlineSprintSelection.replaceChildren();
+  if (deadlineSprintPreview) {
+    const summary = document.createElement("strong");
+    summary.textContent = `已选择 ${stats.count} 轮，共 ${stats.minutes} 分钟 · 涉及 ${stats.days} 天`;
+    const intensity = document.createElement("span");
+    intensity.textContent = `强度：${stats.intensityLevel === "high" ? "高" : stats.intensityLevel === "moderate" ? "适中" : "低"}`;
+    els.deadlineSprintSelection.append(summary, intensity);
+    if (stats.intensityLevel === "high") {
+      const reminder = document.createElement("p");
+      reminder.textContent = "冲刺强度较高，记得为自己留出休息时间";
+      els.deadlineSprintSelection.append(reminder);
+    }
+  }
+  if (els.deadlineSprintAdoptButton) {
+    els.deadlineSprintAdoptButton.disabled = true;
+    els.deadlineSprintAdoptButton.setAttribute("aria-disabled", "true");
+  }
+}
+
+function renderDeadlineSprintInterface(now = Date.now()) {
+  if (!els.deadlineSprintPanel || !els.deadlineSprintTaskSelect || !els.deadlineSprintGenerateButton) return;
+  const timestamp = Number(now);
+  const eligible = getDeadlineSprintEligibleTasks(timestamp);
+  const previousTaskId = deadlineSprintTaskId;
+  const selected = eligible.find(({ task }) => String(task.id) === String(deadlineSprintTaskId));
+  if (deadlineSprintTaskId && !selected) {
+    deadlineSprintTaskId = null;
+    deadlineSprintSelectedIds = new Set();
+    if (!deadlineSprintPreview) deadlineSprintError = "原先选择的任务已不可用，请重新选择";
+  }
+
+  els.deadlineSprintTaskSelect.replaceChildren();
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = eligible.length > 0 ? "请选择具有未来截止时间的任务" : "没有可用于冲刺的任务";
+  els.deadlineSprintTaskSelect.append(placeholder);
+  eligible.forEach(({ task, deadlineAt }) => {
+    const option = document.createElement("option");
+    option.value = String(task.id);
+    option.textContent = `${String(task.title || "未命名任务")} · ${deadlineSprintDateTime(deadlineAt)} 截止 · 剩余 ${deadlineSprintRemainingText(deadlineAt, timestamp)}`;
+    els.deadlineSprintTaskSelect.append(option);
+  });
+  els.deadlineSprintTaskSelect.value = deadlineSprintTaskId || "";
+  els.deadlineSprintTaskSelect.disabled = deadlineSprintGenerating || eligible.length === 0;
+
+  const active = eligible.find(({ task }) => String(task.id) === String(deadlineSprintTaskId));
+  els.deadlineSprintTaskMeta.textContent = active
+    ? `${String(active.task.title || "未命名任务")} · ${deadlineSprintDateTime(active.deadlineAt)} 截止 · 剩余 ${deadlineSprintRemainingText(active.deadlineAt, timestamp)}`
+    : eligible.length === 0 ? "当前没有未完成且具有未来截止时间的任务。" : "先选择一个任务，再生成候选冲刺时段。";
+  els.deadlineSprintGenerateButton.disabled = !active || deadlineSprintGenerating;
+  els.deadlineSprintGenerateButton.setAttribute("aria-disabled", String(els.deadlineSprintGenerateButton.disabled));
+  els.deadlineSprintGenerateButton.textContent = deadlineSprintGenerating ? "生成中…" : deadlineSprintPreview ? "重新生成冲刺时段" : "生成冲刺时段";
+  els.dailyPlanCard?.setAttribute("aria-busy", String(deadlineSprintGenerating));
+  els.dailyPlanCard?.classList.toggle("is-loading", deadlineSprintGenerating);
+  els.dailyPlanCard?.classList.toggle("is-error", Boolean(deadlineSprintError));
+  if (dailyPlanMode === "deadline-sprint" && els.dailyPlanStatus) {
+    els.dailyPlanStatus.textContent = deadlineSprintGenerating
+      ? "生成中"
+      : deadlineSprintError ? "生成失败" : deadlineSprintPreview ? "候选已生成" : "尚未生成";
+  }
+  renderDeadlineSprintCandidates();
+  return { eligible, invalidatedTaskId: previousTaskId && !selected ? previousTaskId : null };
+}
+
+function renderDailyPlanMode(now = Date.now()) {
+  const sprintMode = dailyPlanMode === "deadline-sprint";
+  if (els.dailyPlanBalancedModeButton) els.dailyPlanBalancedModeButton.setAttribute("aria-selected", String(!sprintMode));
+  if (els.dailyPlanSprintModeButton) els.dailyPlanSprintModeButton.setAttribute("aria-selected", String(sprintMode));
+  if (els.dailyPlanBalancedPanel) els.dailyPlanBalancedPanel.hidden = sprintMode;
+  if (els.deadlineSprintPanel) els.deadlineSprintPanel.hidden = !sprintMode;
+  if (sprintMode) renderDeadlineSprintInterface(now);
+  else renderDailyPlanPreview(now);
+}
+
+function setDailyPlanMode(mode, now = Date.now()) {
+  const nextMode = mode === "deadline-sprint" ? "deadline-sprint" : "balanced";
+  if (dailyPlanMode === nextMode) {
+    renderDailyPlanMode(now);
+    return false;
+  }
+  dailyPlanMode = nextMode;
+  if (nextMode === "balanced") resetDeadlineSprintMemory(true);
+  renderDailyPlanMode(now);
+  return true;
+}
+
+function selectDeadlineSprintTask(taskId, now = Date.now()) {
+  deadlineSprintTaskId = taskId === undefined || taskId === null || String(taskId) === "" ? null : String(taskId);
+  deadlineSprintPreview = null;
+  deadlineSprintSelectedIds = new Set();
+  deadlineSprintError = null;
+  renderDeadlineSprintInterface(now);
+}
+
+function toggleDeadlineSprintCandidate(candidateId, selected) {
+  const id = String(candidateId || "");
+  const exists = Array.isArray(deadlineSprintPreview?.candidates)
+    && deadlineSprintPreview.candidates.some((candidate) => String(candidate.id) === id);
+  if (!exists) return false;
+  if (selected) deadlineSprintSelectedIds.add(id);
+  else deadlineSprintSelectedIds.delete(id);
+  renderDeadlineSprintCandidates();
+  return true;
+}
+
+async function generateDeadlineSprintPreview(now) {
+  const timestamp = Number(now);
+  if (deadlineSprintGenerating || dailyPlanGenerating || dailyPlanAdopting) return false;
+  deadlineSprintGenerating = true;
+  deadlineSprintPreview = null;
+  deadlineSprintSelectedIds = new Set();
+  deadlineSprintError = null;
+  if (els.deadlineSprintTaskSelect) els.deadlineSprintTaskSelect.disabled = true;
+  if (els.deadlineSprintGenerateButton) {
+    els.deadlineSprintGenerateButton.disabled = true;
+    els.deadlineSprintGenerateButton.setAttribute("aria-disabled", "true");
+    els.deadlineSprintGenerateButton.textContent = "生成中…";
+  }
+  if (els.dailyPlanCard) els.dailyPlanCard.setAttribute("aria-busy", "true");
+  if (els.dailyPlanStatus) els.dailyPlanStatus.textContent = "生成中";
+  renderDeadlineSprintCandidates();
+  try {
+    await Promise.resolve();
+    const input = getDeadlineSprintCandidateInput(timestamp, deadlineSprintTaskId);
+    if (!input) {
+      deadlineSprintTaskId = null;
+      deadlineSprintError = "选择的任务已被删除或完成，请重新选择";
+      return false;
+    }
+    deadlineSprintPreview = globalThis.DailyPlanner.buildDeadlineSprintCandidates(input);
+    return true;
+  } catch (error) {
+    console.error("Deadline sprint preview failed:", error);
+    deadlineSprintError = "生成冲刺时段失败，请稍后重试";
+    return false;
+  } finally {
+    deadlineSprintGenerating = false;
+    renderDeadlineSprintInterface(timestamp);
+  }
+}
+
 function dailyPlanClock(timestamp) {
   const value = new Date(timestamp);
   return `${String(value.getHours()).padStart(2, "0")}:${String(value.getMinutes()).padStart(2, "0")}`;
@@ -4155,7 +4497,7 @@ async function adoptDailyPlanPreview(adoptedAt) {
 
 function renderHome() {
   if (!els.homeTodayMinutes) return;
-  renderDailyPlanPreview();
+  renderDailyPlanMode();
   const now = new Date();
   const todayKey = dateKey(now);
   const todayTasks = getTodayOpenTasks();
@@ -4436,6 +4778,10 @@ function setActiveView(viewName) {
 els.startPauseButton.addEventListener("click", () => state.isRunning ? pauseTimer() : startTimer());
 els.dailyPlanGenerateButton.addEventListener("click", () => generateDailyPlanPreview(Date.now()));
 els.dailyPlanAdoptButton.addEventListener("click", () => adoptDailyPlanPreview(Date.now()));
+els.dailyPlanBalancedModeButton?.addEventListener("click", () => setDailyPlanMode("balanced", Date.now()));
+els.dailyPlanSprintModeButton?.addEventListener("click", () => setDailyPlanMode("deadline-sprint", Date.now()));
+els.deadlineSprintTaskSelect?.addEventListener("change", () => selectDeadlineSprintTask(els.deadlineSprintTaskSelect.value, Date.now()));
+els.deadlineSprintGenerateButton?.addEventListener("click", () => generateDeadlineSprintPreview(Date.now()));
 els.resetButton.addEventListener("click", resetTimer);
 els.fastFinishButton.addEventListener("click", fastFinishSession);
 els.plant.addEventListener("click", toggleFlower);
