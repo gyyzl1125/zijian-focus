@@ -77,8 +77,8 @@ function normalizeStateInHarness(state) {
 test("default state and browser load order include activity session support", () => {
   assert.match(source, /activitySessions:\s*\[\]/);
   assert.match(source, /activeActivitySessionId:\s*null/);
-  const activityIndex = indexSource.indexOf("activity-sessions.js?v=1");
-  const appIndex = indexSource.indexOf("app.js?v=53");
+  const activityIndex = indexSource.indexOf("activity-sessions.js?v=57");
+  const appIndex = indexSource.indexOf("app.js?v=57");
   assert.ok(activityIndex >= 0 && appIndex > activityIndex);
 });
 

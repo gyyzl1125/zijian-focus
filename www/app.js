@@ -89,6 +89,10 @@ const defaultState = {
   selectedMemoTag: "全部",
   focusSessions: [],
   focusByDate: {},
+  activitySessions: [],
+  activeActivitySessionId: null,
+  habits: [],
+  habitEntries: [],
   selectedTaskColor: "sage",
   heatmapPalette: "forest",
   heatmapImage: "",
@@ -119,6 +123,20 @@ let dailyPlanGenerating = false;
 let dailyPlanAdopting = false;
 let dailyPlanAdoptionError = null;
 let dailyPlanPreviewNeedsRegeneration = false;
+let dailyPlanSelectedBlockIds = new Set();
+let dailyPlanMode = "balanced";
+let deadlineSprintPreview = null;
+let deadlineSprintSelectedIds = new Set();
+let deadlineSprintTaskId = null;
+let deadlineSprintGenerating = false;
+let deadlineSprintError = null;
+let deadlineSprintAdopting = false;
+let deadlineSprintAdoptionError = null;
+let deadlineSprintAdoptionNotice = null;
+let deadlineSprintConflictIds = new Set();
+let selectedHabitDate = dateKey();
+let selectedHabitStatsFilter = "all";
+let editingHabitId = null;
 
 const els = {
   scene: document.querySelector("#scene"),
@@ -162,6 +180,47 @@ const els = {
   flameEarnedWeek: document.querySelector("#flameEarnedWeek"),
   flameSpentWeek: document.querySelector("#flameSpentWeek"),
   flameBalanceText: document.querySelector("#flameBalanceText"),
+  habitPanel: document.querySelector("#habitPanel"),
+  habitAddButton: document.querySelector("#habitAddButton"),
+  habitOnboarding: document.querySelector("#habitOnboarding"),
+  habitOnboardingButton: document.querySelector("#habitOnboardingButton"),
+  habitContentSections: [...document.querySelectorAll("[data-habit-content]")],
+  habitStatsFilter: document.querySelector("#habitStatsFilter"),
+  habitTodayRate: document.querySelector("#habitTodayRate"),
+  habitTodayDetail: document.querySelector("#habitTodayDetail"),
+  habitTodayProgress: document.querySelector("#habitTodayProgress"),
+  habitWeekStrip: document.querySelector("#habitWeekStrip"),
+  habitWeekRate: document.querySelector("#habitWeekRate"),
+  habitWeekDetail: document.querySelector("#habitWeekDetail"),
+  habitWeekOverview: document.querySelector("#habitWeekOverview"),
+  habitCurrentStreak: document.querySelector("#habitCurrentStreak"),
+  habitLongestStreak: document.querySelector("#habitLongestStreak"),
+  habitTrendChart: document.querySelector("#habitTrendChart"),
+  habitHeatmapScroller: document.querySelector("#habitHeatmapScroller"),
+  habitHeatmap: document.querySelector("#habitHeatmap"),
+  habitHeatmapRange: document.querySelector("#habitHeatmapRange"),
+  habitSelectedDate: document.querySelector("#habitSelectedDate"),
+  habitCompletionText: document.querySelector("#habitCompletionText"),
+  habitCompletionProgress: document.querySelector("#habitCompletionProgress"),
+  habitList: document.querySelector("#habitList"),
+  habitEmpty: document.querySelector("#habitEmpty"),
+  habitStatus: document.querySelector("#habitStatus"),
+  habitEditorSheet: document.querySelector("#habitEditorSheet"),
+  habitEditorBackdrop: document.querySelector("#habitEditorBackdrop"),
+  habitEditorClose: document.querySelector("#habitEditorClose"),
+  habitEditorTitle: document.querySelector("#habitEditorTitle"),
+  habitForm: document.querySelector("#habitForm"),
+  habitTitle: document.querySelector("#habitTitle"),
+  habitMetricType: document.querySelector("#habitMetricType"),
+  habitColor: document.querySelector("#habitColor"),
+  habitTargetField: document.querySelector("#habitTargetField"),
+  habitTargetValue: document.querySelector("#habitTargetValue"),
+  habitUnitField: document.querySelector("#habitUnitField"),
+  habitUnit: document.querySelector("#habitUnit"),
+  habitIncludeInPlanner: document.querySelector("#habitIncludeInPlanner"),
+  habitDayInputs: [...document.querySelectorAll('input[name="habitDay"]')],
+  habitSubmitButton: document.querySelector("#habitSubmitButton"),
+  habitArchiveButton: document.querySelector("#habitArchiveButton"),
   streakDays: document.querySelector("#streakDays"),
   streakPill: document.querySelector("#streakPill"),
   streakHint: document.querySelector("#streakHint"),
@@ -171,8 +230,19 @@ const els = {
   timelineDateTitle: document.querySelector("#timelineDateTitle"),
   timelineStats: document.querySelector("#timelineStats"),
   timelineList: document.querySelector("#timelineList"),
+  timelineTaskSelect: document.querySelector("#timelineTaskSelect"),
+  timelineStartButton: document.querySelector("#timelineStartButton"),
+  timelineTaskEmpty: document.querySelector("#timelineTaskEmpty"),
+  timelineRunningCard: document.querySelector("#timelineRunningCard"),
+  timelineRunningTitle: document.querySelector("#timelineRunningTitle"),
+  timelineRunningStarted: document.querySelector("#timelineRunningStarted"),
+  timelineRunningElapsed: document.querySelector("#timelineRunningElapsed"),
+  timelineEndButton: document.querySelector("#timelineEndButton"),
+  timelineActivityStatus: document.querySelector("#timelineActivityStatus"),
   weekBoard: document.querySelector("#weekBoard"),
+  weekDayHeaders: document.querySelector("#weekDayHeaders"),
   weekRangeTitle: document.querySelector("#weekRangeTitle"),
+  weekNavigationStatus: document.querySelector("#weekNavigationStatus"),
   prevWeekButton: document.querySelector("#prevWeekButton"),
   nextWeekButton: document.querySelector("#nextWeekButton"),
   importIcsButton: document.querySelector("#importIcsButton"),
@@ -265,6 +335,17 @@ const els = {
   dailyPlanGenerateButton: document.querySelector("#dailyPlanGenerateButton"),
   dailyPlanAdoptButton: document.querySelector("#dailyPlanAdoptButton"),
   dailyPlanNextStage: document.querySelector("#dailyPlanNextStage"),
+  dailyPlanBalancedModeButton: document.querySelector("#dailyPlanBalancedModeButton"),
+  dailyPlanSprintModeButton: document.querySelector("#dailyPlanSprintModeButton"),
+  dailyPlanBalancedPanel: document.querySelector("#dailyPlanBalancedPanel"),
+  deadlineSprintPanel: document.querySelector("#deadlineSprintPanel"),
+  deadlineSprintTaskSelect: document.querySelector("#deadlineSprintTaskSelect"),
+  deadlineSprintTaskMeta: document.querySelector("#deadlineSprintTaskMeta"),
+  deadlineSprintGenerateButton: document.querySelector("#deadlineSprintGenerateButton"),
+  deadlineSprintContent: document.querySelector("#deadlineSprintContent"),
+  deadlineSprintSelection: document.querySelector("#deadlineSprintSelection"),
+  deadlineSprintAdoptButton: document.querySelector("#deadlineSprintAdoptButton"),
+  deadlineSprintAdoptionMessage: document.querySelector("#deadlineSprintAdoptionMessage"),
   profileFlames: document.querySelector("#profileFlames"),
   usagePermissionCard: document.querySelector("#usagePermissionCard"),
   usagePermissionButton: document.querySelector("#usagePermissionButton"),
@@ -338,6 +419,8 @@ const els = {
 let activeView = "home";
 let selectedTimelineDate = dateKey();
 let selectedWeekDate = dateKey();
+let weekShiftInProgress = false;
+let weekScrollInitialized = false;
 let selectedStatsWeekDate = dateKey();
 let feedIndex = 0;
 let previewSkinId = null;
@@ -446,6 +529,37 @@ function filterDeletedEntities(items, deletionMap) {
 }
 
 function normalizeState() {
+  const activityApi = globalThis.ActivitySessions;
+  if (activityApi?.normalizeActivitySessions && activityApi?.repairActiveActivitySessionId) {
+    state.activitySessions = activityApi.normalizeActivitySessions(state.activitySessions, Date.now());
+    state.activeActivitySessionId = activityApi.repairActiveActivitySessionId(
+      state.activitySessions,
+      state.activeActivitySessionId
+    );
+  } else {
+    state.activitySessions = Array.isArray(state.activitySessions) ? state.activitySessions : [];
+    state.activeActivitySessionId = null;
+  }
+  const habitApi = globalThis.Habits;
+  if (habitApi?.normalizeHabits && habitApi?.normalizeHabitEntries) {
+    state.habits = habitApi.normalizeHabits(state.habits, Date.now());
+    state.habitEntries = habitApi.normalizeHabitEntries(state.habitEntries, Date.now());
+    if (habitApi.reconcileHabitEntriesFromSessions) {
+      state.habitEntries = habitApi.reconcileHabitEntriesFromSessions(
+        state.habits,
+        state.habitEntries,
+        state.activitySessions,
+        Math.max(
+          ...state.activitySessions.map((session) => Number(session.updatedAt) || 0),
+          ...state.habitEntries.map((entry) => Number(entry.updatedAt) || 0),
+          0
+        )
+      );
+    }
+  } else {
+    state.habits = Array.isArray(state.habits) ? state.habits : [];
+    state.habitEntries = Array.isArray(state.habitEntries) ? state.habitEntries : [];
+  }
   state.deletions = normalizeDeletionRegistry(state.deletions);
   state.tasks = filterDeletedEntities(state.tasks, state.deletions.tasks);
   state.flames = Number(state.flames || 0);
@@ -646,6 +760,38 @@ function mergeSyncedStates(local, remote) {
   ["courses", "focusSessions", "flameLedger", "transactions"].forEach((key) => {
     merged[key] = mergeById(local?.[key], remote?.[key], preferRemote);
   });
+  const activityApi = globalThis.ActivitySessions;
+  if (activityApi?.mergeActivitySessions && activityApi?.repairActiveActivitySessionId) {
+    merged.activitySessions = activityApi.mergeActivitySessions(local?.activitySessions, remote?.activitySessions);
+    merged.activeActivitySessionId = activityApi.repairActiveActivitySessionId(
+      merged.activitySessions,
+      preferred?.activeActivitySessionId
+    );
+  } else {
+    merged.activitySessions = mergeById(local?.activitySessions, remote?.activitySessions, preferRemote);
+    merged.activeActivitySessionId = null;
+  }
+  const habitApi = globalThis.Habits;
+  if (habitApi?.mergeHabits && habitApi?.mergeHabitEntries) {
+    merged.habits = habitApi.mergeHabits(local?.habits, remote?.habits);
+    merged.habitEntries = habitApi.mergeHabitEntries(local?.habitEntries, remote?.habitEntries);
+    if (habitApi.reconcileHabitEntriesFromSessions) {
+      const revision = Math.max(
+        ...merged.activitySessions.map((session) => Number(session.updatedAt) || 0),
+        ...merged.habitEntries.map((entry) => Number(entry.updatedAt) || 0),
+        0
+      );
+      merged.habitEntries = habitApi.reconcileHabitEntriesFromSessions(
+        merged.habits,
+        merged.habitEntries,
+        merged.activitySessions,
+        revision
+      );
+    }
+  } else {
+    merged.habits = mergeById(local?.habits, remote?.habits, preferRemote);
+    merged.habitEntries = mergeById(local?.habitEntries, remote?.habitEntries, preferRemote);
+  }
   merged.tasks = filterDeletedEntities(
     mergeById(local?.tasks, remote?.tasks, preferRemote),
     merged.deletions.tasks
@@ -674,6 +820,37 @@ function mergeSyncedStates(local, remote) {
 
 function cloudSafeState() {
   const snapshot = structuredClone(state);
+  const activityApi = globalThis.ActivitySessions;
+  if (activityApi?.normalizeActivitySessions && activityApi?.repairActiveActivitySessionId) {
+    snapshot.activitySessions = activityApi.normalizeActivitySessions(snapshot.activitySessions, Date.now());
+    snapshot.activeActivitySessionId = activityApi.repairActiveActivitySessionId(
+      snapshot.activitySessions,
+      snapshot.activeActivitySessionId
+    );
+  } else {
+    snapshot.activitySessions = Array.isArray(snapshot.activitySessions) ? snapshot.activitySessions : [];
+    snapshot.activeActivitySessionId = null;
+  }
+  const habitApi = globalThis.Habits;
+  if (habitApi?.normalizeHabits && habitApi?.normalizeHabitEntries) {
+    snapshot.habits = habitApi.normalizeHabits(snapshot.habits, Date.now());
+    snapshot.habitEntries = habitApi.normalizeHabitEntries(snapshot.habitEntries, Date.now());
+    if (habitApi.reconcileHabitEntriesFromSessions) {
+      snapshot.habitEntries = habitApi.reconcileHabitEntriesFromSessions(
+        snapshot.habits,
+        snapshot.habitEntries,
+        snapshot.activitySessions,
+        Math.max(
+          ...snapshot.activitySessions.map((session) => Number(session.updatedAt) || 0),
+          ...snapshot.habitEntries.map((entry) => Number(entry.updatedAt) || 0),
+          0
+        )
+      );
+    }
+  } else {
+    snapshot.habits = Array.isArray(snapshot.habits) ? snapshot.habits : [];
+    snapshot.habitEntries = Array.isArray(snapshot.habitEntries) ? snapshot.habitEntries : [];
+  }
   snapshot.deletions = normalizeDeletionRegistry(snapshot.deletions);
   snapshot.tasks = filterDeletedEntities(snapshot.tasks, snapshot.deletions.tasks);
   snapshot.memos = filterDeletedEntities(snapshot.memos, snapshot.deletions.memos);
@@ -1250,11 +1427,19 @@ function removeDeletedTaskReferencesFromPlans(plans, taskIds, deletedAt, revised
         });
       }
     });
+    const nextBlocks = blocks.filter((item) => !taskIds.has(String(item?.taskId)));
+    const nextBlockModes = new Set(nextBlocks.map((block) => String(block?.planningMode || "").toLowerCase() === "deadline-sprint"
+      ? "deadline-sprint"
+      : "balanced"));
+    const nextMode = nextBlockModes.has("deadline-sprint") && nextBlockModes.has("balanced")
+      ? "mixed"
+      : nextBlockModes.has("deadline-sprint") ? "deadline-sprint" : "balanced";
     nextPlans[dayKeyValue] = {
       ...plan,
+      ...(Number(plan.version) === 2 ? { mode: nextMode } : {}),
       adopted_at: Math.max(Number.isFinite(Number(plan.adopted_at)) ? Number(plan.adopted_at) : 0, revisedAt),
       priorities: priorities.filter((item) => !taskIds.has(String(item?.taskId))),
-      blocks: blocks.filter((item) => !taskIds.has(String(item?.taskId))),
+      blocks: nextBlocks,
       warnings,
     };
   });
@@ -1298,6 +1483,7 @@ function deleteTasksByIds(taskIds, deletedAt) {
   state.dailyPlans = removeDeletedTaskReferencesFromPlans(state.dailyPlans, deletedIds, timestamp, revisionAt);
   if (dailyPlanReferencesAnyTask(dailyPlanPreview, deletedIds)) {
     dailyPlanPreview = null;
+    dailyPlanSelectedBlockIds = new Set();
     dailyPlanPreviewError = null;
     dailyPlanAdoptionError = null;
     dailyPlanPreviewNeedsRegeneration = true;
@@ -1854,13 +2040,227 @@ function renderTasks() {
   }
 }
 
-function renderTimeline() {
+function getActivitySessionsForTimelineDay(sessions, dayKeyValue) {
+  const dayStart = new Date(`${dayKeyValue}T00:00:00`).getTime();
+  const dayEndDate = new Date(dayStart);
+  dayEndDate.setDate(dayEndDate.getDate() + 1);
+  const dayEnd = dayEndDate.getTime();
+  if (!Number.isFinite(dayStart) || !Array.isArray(sessions)) return [];
+  return sessions
+    .filter((session) => session?.status === "completed"
+      && Number.isFinite(Number(session.startAt))
+      && Number.isFinite(Number(session.endAt))
+      && Number(session.startAt) < dayEnd
+      && Number(session.endAt) > dayStart)
+    .map((session) => {
+      const displayStartAt = Math.max(dayStart, Number(session.startAt));
+      const displayEndAt = Math.min(dayEnd, Number(session.endAt));
+      return {
+        ...session,
+        displayStartAt,
+        displayEndAt,
+        displayMinutes: Math.max(1, Math.round((displayEndAt - displayStartAt) / 60000)),
+      };
+    })
+    .sort((left, right) => left.displayStartAt - right.displayStartAt
+      || left.displayEndAt - right.displayEndAt
+      || String(left.id).localeCompare(String(right.id)));
+}
+
+function formatActivityElapsed(milliseconds) {
+  const totalSeconds = Math.max(0, Math.floor(Number(milliseconds || 0) / 1000));
+  if (totalSeconds < 60) return `${totalSeconds}秒`;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return hours > 0 ? `${hours}小时${minutes}分钟` : `${totalMinutes}分钟`;
+}
+
+function renderTimelineTaskPicker() {
+  if (!els.timelineTaskSelect || !els.timelineStartButton) return;
+  const previousValue = els.timelineTaskSelect.value;
+  const tasks = (state.tasks || [])
+    .filter((task) => task && !task.done && String(task.id || "").trim())
+    .slice()
+    .sort((left, right) => Number(left.endAt || 0) - Number(right.endAt || 0)
+      || String(left.title || "").localeCompare(String(right.title || ""))
+      || String(left.id).localeCompare(String(right.id)));
+  const habits = globalThis.Habits?.normalizeHabits?.(state.habits, Date.now())
+    ?.filter((habit) => habit.archivedAt === null && ["duration", "count"].includes(habit.metricType))
+    .sort((left, right) => String(left.title || "").localeCompare(String(right.title || "")) || String(left.id).localeCompare(String(right.id))) || [];
+  els.timelineTaskSelect.replaceChildren();
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = tasks.length + habits.length > 0 ? "选择任务或可执行习惯" : "暂无可执行项目";
+  els.timelineTaskSelect.append(placeholder);
+  tasks.forEach((task) => {
+    const option = document.createElement("option");
+    option.value = String(task.id);
+    option.textContent = String(task.title || "未命名任务");
+    els.timelineTaskSelect.append(option);
+  });
+  habits.forEach((habit) => {
+    const option = document.createElement("option");
+    option.value = `habit:${habit.id}`;
+    option.textContent = `习惯 · ${String(habit.title || "未命名习惯")}`;
+    els.timelineTaskSelect.append(option);
+  });
+  const validValues = new Set([...tasks.map((task) => String(task.id)), ...habits.map((habit) => `habit:${habit.id}`)]);
+  els.timelineTaskSelect.value = validValues.has(previousValue) ? previousValue : "";
+  const canStart = Boolean(els.timelineTaskSelect.value);
+  els.timelineStartButton.disabled = !canStart;
+  els.timelineStartButton.setAttribute("aria-disabled", String(!canStart));
+  if (els.timelineTaskEmpty) els.timelineTaskEmpty.hidden = tasks.length + habits.length > 0;
+}
+
+function renderRunningActivity(now = Date.now()) {
+  if (!els.timelineRunningCard) return;
+  const activityApi = globalThis.ActivitySessions;
+  const running = activityApi?.getRunningActivitySession?.(
+    state.activitySessions,
+    state.activeActivitySessionId
+  );
+  els.timelineRunningCard.hidden = !running;
+  if (!running) return;
+  els.timelineRunningTitle.textContent = String(running.title || "未命名任务");
+  els.timelineRunningStarted.textContent = `开始于 ${formatClock(running.startAt)}`;
+  els.timelineRunningElapsed.textContent = `已持续 ${formatActivityElapsed(Number(now) - running.startAt)}`;
+}
+
+function applyActivityUiResult(result, successTitle, successBody) {
+  if (!result?.ok || !result.changed) return false;
+  const previousSessions = state.activitySessions;
+  const previousActiveId = state.activeActivitySessionId;
+  const previousHabitEntries = state.habitEntries;
+  const previousSyncUpdatedAt = state.syncUpdatedAt;
+  try {
+    state.activitySessions = result.sessions;
+    state.activeActivitySessionId = result.activeActivitySessionId;
+    const habitApi = globalThis.Habits;
+    if (habitApi?.reconcileHabitEntriesFromSessions) {
+      state.habitEntries = habitApi.reconcileHabitEntriesFromSessions(
+        state.habits,
+        state.habitEntries,
+        state.activitySessions,
+        Math.max(...state.activitySessions.map((session) => Number(session.updatedAt) || 0), 0)
+      );
+    }
+    const saved = saveState();
+    if (saved === false) throw new Error("saveState returned false");
+    renderTimeline();
+    if (typeof renderHabits === "function") renderHabits();
+    if (els.timelineActivityStatus) els.timelineActivityStatus.textContent = successTitle;
+    showReminderToast(successTitle, successBody);
+    return true;
+  } catch (error) {
+    console.error("Activity session save failed:", error);
+    state.activitySessions = previousSessions;
+    state.activeActivitySessionId = previousActiveId;
+    state.habitEntries = previousHabitEntries;
+    state.syncUpdatedAt = previousSyncUpdatedAt;
+    renderTimeline();
+    showReminderToast("保存失败", "实际活动记录没有保存，请稍后重试。");
+    return false;
+  }
+}
+
+function startSelectedTaskActivity(now = Date.now()) {
+  const activityApi = globalThis.ActivitySessions;
+  const selectedValue = String(els.timelineTaskSelect?.value || "");
+  const isHabit = selectedValue.startsWith("habit:");
+  const entityId = isHabit ? selectedValue.slice(6) : selectedValue;
+  const entity = isHabit
+    ? (state.habits || []).find((item) => String(item?.id) === entityId && item.archivedAt === null && ["duration", "count"].includes(item.metricType))
+    : (state.tasks || []).find((item) => String(item?.id) === entityId && !item.done);
+  if (!activityApi || !entity) {
+    renderTimelineTaskPicker();
+    showReminderToast("无法开始执行", "请选择一个仍可执行的任务或习惯。");
+    return false;
+  }
+  const running = activityApi.getRunningActivitySession(state.activitySessions, state.activeActivitySessionId);
+  let result;
+  if (!running) {
+    result = (isHabit ? activityApi.startHabitActivity : activityApi.startTaskActivity)({
+      sessions: state.activitySessions,
+      activeActivitySessionId: state.activeActivitySessionId,
+      [isHabit ? "habit" : "task"]: entity,
+      now,
+      idFactory: () => crypto.randomUUID(),
+    });
+  } else {
+    const shouldSwitch = confirm(`当前正在进行“${running.title}”，是否结束当前活动并切换到“${entity.title}”？`);
+    if (!shouldSwitch) return false;
+    const isShort = Number(now) - Number(running.startAt) < 60000;
+    const keepShort = !isShort || confirm("当前活动不足 1 分钟，是否保留这条实际记录？");
+    if (keepShort) {
+      result = (isHabit ? activityApi.switchHabitActivity : activityApi.switchTaskActivity)({
+        sessions: state.activitySessions,
+        activeActivitySessionId: state.activeActivitySessionId,
+        [isHabit ? "habit" : "task"]: entity,
+        now,
+        idFactory: () => crypto.randomUUID(),
+      });
+    } else {
+      const cancelled = activityApi.cancelActivitySession({
+        sessions: state.activitySessions,
+        activeActivitySessionId: state.activeActivitySessionId,
+        now,
+      });
+      result = cancelled.ok ? (isHabit ? activityApi.startHabitActivity : activityApi.startTaskActivity)({
+        sessions: cancelled.sessions,
+        activeActivitySessionId: null,
+        [isHabit ? "habit" : "task"]: entity,
+        now,
+        idFactory: () => crypto.randomUUID(),
+      }) : cancelled;
+    }
+  }
+  if (!result?.ok) {
+    showReminderToast("无法开始执行", "活动状态已经变化，请刷新后重试。");
+    return false;
+  }
+  return applyActivityUiResult(result, isHabit ? "习惯已开始" : "任务已开始", `正在记录“${entity.title}”。`);
+}
+
+function endCurrentTaskActivity(now = Date.now()) {
+  const activityApi = globalThis.ActivitySessions;
+  if (!activityApi) return false;
+  const completed = activityApi.completeActivitySession({
+    sessions: state.activitySessions,
+    activeActivitySessionId: state.activeActivitySessionId,
+    now,
+  });
+  if (!completed.ok) {
+    renderTimeline();
+    showReminderToast("没有进行中的任务", "当前没有需要结束的实际活动。");
+    return false;
+  }
+  let result = completed;
+  let kept = true;
+  if (completed.shortSession) {
+    kept = confirm("本次活动不足 1 分钟，是否保留这条实际记录？");
+    if (!kept) {
+      result = activityApi.cancelActivitySession({
+        sessions: state.activitySessions,
+        activeActivitySessionId: state.activeActivitySessionId,
+        now,
+      });
+    }
+  }
+  return applyActivityUiResult(
+    result,
+    kept ? "实际记录已保存" : "短记录未保留",
+    kept ? `已记录“${completed.session.title}”。` : "本次活动已结束，但不会进入实际时间轴。"
+  );
+}
+
+function renderTimeline(now = Date.now()) {
   const labels = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
   const selectedDate = new Date(`${selectedTimelineDate}T00:00:00`);
   const weekStart = getWeekStart(selectedDate);
   const todayKey = dateKey();
 
-  els.weekStrip.innerHTML = "";
+  els.weekStrip.replaceChildren();
   for (let index = 0; index < 7; index += 1) {
     const day = new Date(weekStart);
     day.setDate(weekStart.getDate() + index);
@@ -1870,17 +2270,11 @@ function renderTimeline() {
     button.className = "week-day";
     button.classList.toggle("is-selected", key === selectedTimelineDate);
     button.classList.toggle("is-today", key === todayKey);
+    button.setAttribute("aria-pressed", String(key === selectedTimelineDate));
     const label = document.createElement("span");
     label.textContent = labels[index];
     const number = document.createElement("strong");
     number.textContent = String(day.getDate());
-    const ddlCount = state.tasks.filter((task) => !task.done && dateKey(new Date(task.endAt)) === key).length;
-    if (ddlCount > 0) {
-      const badge = document.createElement("em");
-      badge.className = "ddl-count";
-      badge.textContent = ddlCount;
-      button.append(badge);
-    }
     button.append(label, number);
     button.addEventListener("click", () => {
       selectedTimelineDate = key;
@@ -1889,84 +2283,367 @@ function renderTimeline() {
     els.weekStrip.append(button);
   }
 
-  const dayTasks = state.tasks
-    .filter((task) => dateKey(new Date(task.startAt)) === selectedTimelineDate)
-    .sort((a, b) => a.startAt - b.startAt);
-  const dayCourses = getDayCourses(selectedTimelineDate)
-    .map((course) => ({ ...course, type: "course", color: "sky", done: false }));
-  const dayFocus = (state.focusSessions || [])
-    .filter((session) => dateKey(new Date(session.startAt)) === selectedTimelineDate)
-    .map((session) => ({ ...session, type: "focus", color: "lemon", done: true }));
-  const dayPlannedFocus = getAdoptedFocusBlocksForDay(selectedTimelineDate);
-  const timelineItems = [
-    ...dayTasks.map((task) => ({ ...task, type: "task" })),
-    ...dayCourses,
-    ...dayFocus,
-    ...dayPlannedFocus,
-  ].sort((a, b) => a.startAt - b.startAt);
-  const totalMinutes = timelineItems.reduce((sum, item) => sum + Math.max(1, Math.round((item.endAt - item.startAt) / 60000)), 0);
+  renderTimelineTaskPicker();
+  renderRunningActivity(now);
+  const timelineItems = getActivitySessionsForTimelineDay(state.activitySessions, selectedTimelineDate);
+  const totalMinutes = timelineItems.reduce((sum, item) => sum + item.displayMinutes, 0);
   const month = selectedDate.getMonth() + 1;
   const day = selectedDate.getDate();
   const weekday = labels[(selectedDate.getDay() || 7) - 1];
   els.timelineDateTitle.textContent = `${month}月${day}日 ${weekday}`;
-  els.timelineStats.textContent = `${timelineItems.length}次 · ${totalMinutes === 0 ? "0分钟" : formatDuration(0, totalMinutes * 60000)}`;
+  els.timelineStats.textContent = `${timelineItems.length}次 · ${totalMinutes}分钟`;
 
-  els.timelineList.innerHTML = "";
+  els.timelineList.replaceChildren();
+  els.timelineList.closest(".timeline-card")?.classList.toggle("is-empty-state", timelineItems.length === 0);
   if (timelineItems.length === 0) {
     const empty = document.createElement("li");
     empty.className = "timeline-empty";
-    empty.textContent = "这一天还没有安排。";
+    empty.textContent = "这一天还没有实际活动记录。";
     els.timelineList.append(empty);
     return;
   }
 
-  for (const entry of timelineItems) {
+  timelineItems.forEach((entry) => {
     const color = getTaskColor(entry.color);
     const item = document.createElement("li");
-    const itemState = entry.type === "focus" || entry.type === "course"
-      ? "done"
-      : entry.type === "planned-focus" ? "planned" : getTaskStatus(entry);
-    item.className = `timeline-item is-${itemState}`;
+    item.className = "timeline-item is-done";
     item.style.setProperty("--task-bg", color.bg);
     item.style.setProperty("--task-border", color.border);
     item.style.setProperty("--task-ink", color.ink);
-
     const time = document.createElement("div");
     time.className = "timeline-time";
     const timeRange = document.createElement("strong");
-    timeRange.textContent = `${formatClock(entry.startAt)}~${formatClock(entry.endAt)}`;
+    timeRange.textContent = `${formatClock(entry.displayStartAt)}~${formatClock(entry.displayEndAt)}`;
     const durationText = document.createElement("span");
-    durationText.textContent = formatDuration(entry.startAt, entry.endAt);
+    durationText.textContent = `${entry.displayMinutes}分钟`;
     time.append(timeRange, durationText);
-
-    const card = document.createElement(entry.type === "planned-focus" ? "button" : "div");
-    card.className = "timeline-task-card";
-    const icon = entry.type === "focus" ? "专" : entry.type === "planned-focus" ? "计" : entry.type === "course" ? "课" : entry.done ? "✓" : "◦";
-    const meta = entry.type === "focus"
-      ? "完成一次专注"
-      : entry.type === "planned-focus"
-        ? `计划专注${entry.orphaned ? " · 原任务已删除" : ""}`
-      : entry.type === "course"
-        ? (entry.location || "课程安排")
-        : entry.done ? "已完成" : "进行计划中";
-    const cardTitle = document.createElement("strong");
-    cardTitle.textContent = `${icon} ${entry.title}`;
-    const cardMeta = document.createElement("span");
-    cardMeta.textContent = meta;
-    card.append(cardTitle, cardMeta);
-    if (entry.type === "planned-focus") {
-      card.type = "button";
-      card.classList.add("is-planned-focus");
-      card.setAttribute("aria-label", `计划专注 ${entry.title}，${formatClock(entry.startAt)} 到 ${formatClock(entry.endAt)}`);
-      card.addEventListener("click", () => showEventDetail(entry));
-    }
-
+    const card = document.createElement("div");
+    card.className = "timeline-task-card is-actual-activity";
+    const title = document.createElement("strong");
+    title.textContent = String(entry.title || "未命名任务");
+    const taskExists = (state.tasks || []).some((task) => String(task?.id) === String(entry.taskId));
+    const meta = document.createElement("span");
+    meta.textContent = taskExists ? "实际活动" : "实际活动 · 原任务已删除";
+    card.append(title, meta);
     item.append(time, card);
     els.timelineList.append(item);
+  });
+}
+
+function isMobileWeekSchedule() {
+  return typeof globalThis.matchMedia === "function" && globalThis.matchMedia("(max-width: 560px)").matches;
+}
+
+function getPlannedItemsForDay(dayKeyValue) {
+  const bounds = getDayBounds(dayKeyValue);
+  if (!bounds) return [];
+  const courses = getDayCourses(dayKeyValue)
+    .map((course) => ({ ...course, type: "course" }));
+  const tasks = (Array.isArray(state.tasks) ? state.tasks : [])
+    .filter((task) => Number.isFinite(Number(task?.startAt))
+      && dateKey(new Date(Number(task.startAt))) === dayKeyValue)
+    .map((task) => ({ ...task, type: "task" }));
+  const plannedFocus = getAdoptedFocusBlocksForDay(dayKeyValue);
+  return [...courses, ...tasks, ...plannedFocus]
+    .filter((item) => Number.isFinite(Number(item.startAt))
+      && Number.isFinite(Number(item.endAt))
+      && Number(item.endAt) > Number(item.startAt))
+    .map((item) => ({
+      ...item,
+      detailItem: { ...item },
+      startAt: Math.max(Number(item.startAt), bounds.startAt),
+      endAt: Math.min(Number(item.endAt), bounds.endAt),
+    }))
+    .filter((item) => item.endAt > item.startAt)
+    .sort((a, b) => a.startAt - b.startAt
+      || a.endAt - b.endAt
+      || weekEventDisplayPriority(a) - weekEventDisplayPriority(b)
+      || String(a.id).localeCompare(String(b.id)));
+}
+
+function getMobilePlannedItemStatuses(item, items, now = Date.now()) {
+  const statuses = [];
+  const conflicts = items.some((other) => (String(other.id) !== String(item.id) || other.type !== item.type)
+    && Number(other.startAt) < Number(item.endAt)
+    && Number(other.endAt) > Number(item.startAt));
+  if (conflicts) statuses.push("冲突");
+  if (item.type === "task" && item.done) statuses.push("已完成");
+  if (item.type === "task" && !item.done && Number(item.endAt) < Number(now)) statuses.push("已过期");
+  if (item.type === "planned-focus" && item.orphaned) statuses.push("原任务已删除");
+  return statuses;
+}
+
+function getMobilePlannedItemLabel(item) {
+  if (item.type === "course") return "课程";
+  if (item.type === "planned-focus") {
+    return item.planningMode === "deadline-sprint" ? "截止前冲刺" : "计划专注";
+  }
+  return "任务";
+}
+
+function renderMobileWeekSchedule(weekStart, weekEnd, options = {}) {
+  const labels = ["一", "二", "三", "四", "五", "六", "日"];
+  const todayKey = dateKey();
+  const now = Date.now();
+  els.weekDayHeaders?.classList.add("is-mobile-day-strip");
+  els.weekBoard.classList.add("is-mobile-day-board");
+  els.weekDayHeaders?.replaceChildren();
+  els.weekBoard.replaceChildren();
+
+  for (let index = 0; index < 7; index += 1) {
+    const day = new Date(weekStart);
+    day.setDate(weekStart.getDate() + index);
+    const key = dateKey(day);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "week-day-header";
+    button.dataset.dayKey = key;
+    button.classList.toggle("is-today", key === todayKey);
+    button.classList.toggle("is-selected", key === selectedWeekDate);
+    button.setAttribute("aria-pressed", String(key === selectedWeekDate));
+    button.setAttribute("aria-label", `周${labels[index]} ${day.getMonth() + 1}月${day.getDate()}日`);
+    const headerLabel = document.createElement("span");
+    headerLabel.textContent = `周${labels[index]}`;
+    const headerDate = document.createElement("strong");
+    headerDate.textContent = String(day.getDate());
+    button.append(headerLabel, headerDate);
+    button.addEventListener("click", () => {
+      if (key === selectedWeekDate) return;
+      selectedWeekDate = key;
+      renderWeekSchedule({ announceDay: true });
+    });
+    els.weekDayHeaders?.append(button);
+  }
+
+  const items = getPlannedItemsForDay(selectedWeekDate);
+  els.weekBoard.closest(".week-schedule")?.classList.toggle("is-empty-state", items.length === 0);
+  const list = document.createElement("div");
+  list.className = "week-mobile-day-list";
+  list.dataset.dayKey = selectedWeekDate;
+  if (items.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "week-mobile-empty";
+    empty.textContent = "这一天还没有计划";
+    list.append(empty);
+  } else {
+    items.forEach((item) => {
+      const detailItem = item.detailItem || item;
+      const card = document.createElement("button");
+      card.type = "button";
+      card.className = `week-mobile-plan-card is-${item.type}`;
+      const color = getTaskColor(item.color || (item.type === "course" ? "sky" : "sage"));
+      card.style.setProperty("--week-block-bg", color.bg);
+      card.style.setProperty("--week-block-border", color.border);
+      card.style.setProperty("--week-block-ink", color.ink);
+      const time = document.createElement("span");
+      time.className = "week-mobile-plan-time";
+      time.textContent = `${formatClock(item.startAt)}–${formatClock(item.endAt)}`;
+      const body = document.createElement("span");
+      body.className = "week-mobile-plan-body";
+      const title = document.createElement("strong");
+      title.textContent = String(item.title || "未命名安排");
+      const meta = document.createElement("span");
+      meta.className = "week-mobile-plan-meta";
+      const type = document.createElement("small");
+      type.className = "week-mobile-plan-type";
+      type.textContent = getMobilePlannedItemLabel(item);
+      meta.append(type);
+      getMobilePlannedItemStatuses(item, items, now).forEach((statusText) => {
+        const status = document.createElement("small");
+        status.className = "week-mobile-plan-status";
+        status.textContent = statusText;
+        meta.append(status);
+      });
+      body.append(title, meta);
+      card.append(time, body);
+      card.setAttribute("aria-label", `${time.textContent} ${type.textContent} ${title.textContent}`);
+      card.addEventListener("click", () => showEventDetail(detailItem));
+      list.append(card);
+    });
+  }
+  els.weekBoard.append(list);
+  if ((options.announce || options.announceDay) && els.weekNavigationStatus) {
+    const selected = new Date(`${selectedWeekDate}T00:00:00`);
+    els.weekNavigationStatus.textContent = options.announce
+      ? `已切换到 ${formatMonthDay(weekStart)}–${formatMonthDay(weekEnd)}`
+      : `已选择 ${formatMonthDay(selected)}`;
+  }
+  if (options.releaseShiftLock) weekShiftInProgress = false;
+}
+
+function layoutOverlappingEvents(events) {
+  const sorted = (Array.isArray(events) ? events : [])
+    .filter((event) => event && typeof event === "object"
+      && String(event.id || "").trim()
+      && Number.isFinite(Number(event.startAt))
+      && Number.isFinite(Number(event.endAt))
+      && Number(event.endAt) > Number(event.startAt))
+    .map((event) => ({ ...event, startAt: Number(event.startAt), endAt: Number(event.endAt) }))
+    .sort((a, b) => a.startAt - b.startAt || a.endAt - b.endAt || String(a.id).localeCompare(String(b.id)));
+  const groups = [];
+  let current = [];
+  let currentEndAt = -Infinity;
+  sorted.forEach((event) => {
+    if (current.length > 0 && event.startAt >= currentEndAt) {
+      groups.push(current);
+      current = [];
+      currentEndAt = -Infinity;
+    }
+    current.push(event);
+    currentEndAt = Math.max(currentEndAt, event.endAt);
+  });
+  if (current.length > 0) groups.push(current);
+
+  return groups.flatMap((group, groupIndex) => {
+    const laneEnds = [];
+    const assigned = group.map((event) => {
+      let laneIndex = laneEnds.findIndex((endAt) => endAt <= event.startAt);
+      if (laneIndex < 0) {
+        laneIndex = laneEnds.length;
+        laneEnds.push(event.endAt);
+      } else {
+        laneEnds[laneIndex] = event.endAt;
+      }
+      return { ...event, laneIndex };
+    });
+    const overlapGroupId = `week-overlap-${groupIndex}-${group[0].startAt}-${group.map((event) => String(event.id)).join("-")}`;
+    return assigned.map((event) => {
+      const boundaries = [...new Set(group.flatMap((item) => [item.startAt, item.endAt]))]
+        .sort((a, b) => a - b);
+      let localConcurrency = 1;
+      for (let index = 0; index < boundaries.length - 1; index += 1) {
+        const startAt = boundaries[index];
+        const endAt = boundaries[index + 1];
+        if (endAt <= event.startAt || startAt >= event.endAt) continue;
+        const concurrent = group.filter((item) => item.startAt < endAt && item.endAt > startAt).length;
+        localConcurrency = Math.max(localConcurrency, concurrent);
+      }
+      const laneCount = Math.max(event.laneIndex + 1, localConcurrency);
+      const visibleLaneCount = Math.min(3, laneCount);
+      const gapPercent = visibleLaneCount > 1 ? 1.5 : 0;
+      const widthPercent = (100 - gapPercent * (visibleLaneCount - 1)) / visibleLaneCount;
+      return {
+        ...event,
+        laneCount,
+        overlapGroupId,
+        widthPercent,
+        leftPercent: event.laneIndex * (widthPercent + gapPercent),
+      };
+    });
+  });
+}
+
+function weekEventDisplayPriority(item) {
+  if (item?.type === "course") return 0;
+  if (item?.type === "task" && globalThis.DailyPlanner?.isFixedTimeTask?.(item)) return 1;
+  if (item?.type === "planned-focus") return 2;
+  return 3;
+}
+
+function buildWeekOverflowDisplay(group, maxLanes = 3) {
+  const items = Array.isArray(group) ? group.slice() : [];
+  const boundaries = [...new Set(items.flatMap((item) => [Number(item.startAt), Number(item.endAt)]))]
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b);
+  const eventSegments = [];
+  const summaries = [];
+  const appendEventSegment = (item, startAt, endAt, laneIndex, laneCount) => {
+    const previous = eventSegments.slice().reverse().find((segment) => segment.id === String(item.id));
+    if (previous && previous.id === String(item.id) && previous.endAt === startAt
+      && previous.laneIndex === laneIndex && previous.laneCount === laneCount) {
+      previous.endAt = endAt;
+      return;
+    }
+    eventSegments.push({ id: String(item.id), item, startAt, endAt, laneIndex, laneCount });
+  };
+  for (let index = 0; index < boundaries.length - 1; index += 1) {
+    const startAt = boundaries[index];
+    const endAt = boundaries[index + 1];
+    if (endAt <= startAt) continue;
+    const active = items.filter((item) => item.startAt < endAt && item.endAt > startAt);
+    if (active.length === 0) continue;
+    const prioritized = active.slice().sort((a, b) => weekEventDisplayPriority(a) - weekEventDisplayPriority(b)
+      || a.startAt - b.startAt || a.endAt - b.endAt || String(a.id).localeCompare(String(b.id)));
+    if (active.length <= maxLanes) {
+      const byLane = active.slice().sort((a, b) => a.laneIndex - b.laneIndex
+        || a.startAt - b.startAt || a.endAt - b.endAt || String(a.id).localeCompare(String(b.id)));
+      byLane.forEach((item, laneIndex) => appendEventSegment(item, startAt, endAt, laneIndex, byLane.length));
+      continue;
+    }
+    prioritized.slice(0, maxLanes - 1)
+      .forEach((item, laneIndex) => appendEventSegment(item, startAt, endAt, laneIndex, maxLanes));
+    const activeIds = prioritized.map((item) => String(item.id)).join("|");
+    const previousSummary = summaries[summaries.length - 1];
+    if (previousSummary && previousSummary.endAt === startAt && previousSummary.activeIds === activeIds) {
+      previousSummary.endAt = endAt;
+    } else {
+      summaries.push({
+        startAt,
+        endAt,
+        activeIds,
+        events: prioritized.map((item) => item.detailItem || item),
+        hiddenCount: active.length - (maxLanes - 1),
+      });
+    }
+  }
+  return { eventSegments, summaries };
+}
+
+function showWeekOverlapSummary(events) {
+  const items = (Array.isArray(events) ? events : [])
+    .slice()
+    .sort((a, b) => Number(a.startAt) - Number(b.startAt)
+      || weekEventDisplayPriority(a) - weekEventDisplayPriority(b)
+      || String(a.id).localeCompare(String(b.id)));
+  if (!items.length) return;
+  eventDetailTaskId = null;
+  els.eventSheetType.textContent = "SCHEDULE";
+  els.eventSheetTitle.textContent = `该时段共有 ${items.length} 项安排`;
+  els.eventSheetMeta.textContent = "";
+  const startAt = Math.min(...items.map((item) => Number(item.startAt)));
+  const endAt = Math.max(...items.map((item) => Number(item.endAt)));
+  const startText = document.createElement("span");
+  const endText = document.createElement("span");
+  const countText = document.createElement("strong");
+  startText.textContent = formatDateTime(startAt);
+  endText.textContent = formatDateTime(endAt);
+  countText.textContent = `${items.length} 项`;
+  els.eventSheetMeta.append(startText, endText, countText);
+  els.eventSheetDescription.textContent = items.map((item) => {
+    const type = item.type === "course"
+      ? "课程"
+      : item.type === "planned-focus" ? "计划专注" : globalThis.DailyPlanner?.isFixedTimeTask?.(item) ? "固定任务" : "任务";
+    return `${formatClock(item.startAt)} ${type} · ${String(item.title || "未命名安排")}`;
+  }).join("\n");
+  if (els.eventSheetDeleteButton) els.eventSheetDeleteButton.hidden = true;
+  els.eventSheet.hidden = false;
+  document.body.classList.add("has-event-sheet");
+}
+
+function syncWeekHeaderScroll() {
+  if (!els.weekBoard || !els.weekDayHeaders) return;
+  if (isMobileWeekSchedule()) return;
+  els.weekDayHeaders.scrollLeft = Number(els.weekBoard.scrollLeft) || 0;
+}
+
+function scheduleWeekBoardPosition(dayKeyValue, releaseShiftLock = false) {
+  const finish = () => {
+    const target = els.weekBoard?.querySelector?.(`[data-day-key="${dayKeyValue}"]`)
+      || els.weekBoard?.querySelector?.(".week-column");
+    if (target && typeof target.scrollIntoView === "function") {
+      target.scrollIntoView({ block: "nearest", inline: dayKeyValue === dateKey() ? "center" : "start" });
+    }
+    syncWeekHeaderScroll();
+    if (releaseShiftLock) weekShiftInProgress = false;
+  };
+  if (typeof globalThis.requestAnimationFrame === "function") {
+    globalThis.requestAnimationFrame(finish);
+  } else {
+    finish();
   }
 }
 
-function renderWeekSchedule() {
+function renderWeekSchedule(options = {}) {
   const labels = ["一", "二", "三", "四", "五", "六", "日"];
   const dayStartHour = 7;
   const dayEndHour = 22;
@@ -1976,7 +2653,18 @@ function renderWeekSchedule() {
   const end = new Date(start);
   end.setDate(start.getDate() + 6);
   els.weekRangeTitle.textContent = `${formatMonthDay(start)} - ${formatMonthDay(end)}`;
-  els.weekBoard.innerHTML = "";
+  if (options.announce && els.weekNavigationStatus) {
+    els.weekNavigationStatus.textContent = `已切换到 ${formatMonthDay(start)}–${formatMonthDay(end)}`;
+  }
+  if (isMobileWeekSchedule()) {
+    renderMobileWeekSchedule(start, end, options);
+    return;
+  }
+  els.weekDayHeaders?.classList.remove("is-mobile-day-strip");
+  els.weekBoard.classList.remove("is-mobile-day-board");
+  els.weekDayHeaders?.replaceChildren();
+  els.weekBoard.replaceChildren();
+  let hasPlannedItems = false;
 
   for (let index = 0; index < 7; index += 1) {
     const day = new Date(start);
@@ -1984,23 +2672,38 @@ function renderWeekSchedule() {
     const key = dateKey(day);
     const column = document.createElement("article");
     column.className = "week-column";
+    column.dataset.dayKey = key;
     column.classList.toggle("is-today", key === dateKey());
-    const header = document.createElement("header");
+    const header = document.createElement("div");
+    header.className = "week-day-header";
+    header.dataset.dayKey = key;
+    header.classList.toggle("is-today", key === dateKey());
     const headerLabel = document.createElement("span");
     headerLabel.textContent = `周${labels[index]}`;
     const headerDate = document.createElement("strong");
     headerDate.textContent = String(day.getDate());
     header.append(headerLabel, headerDate);
-    column.append(header);
+    els.weekDayHeaders?.append(header);
 
     const list = document.createElement("div");
     list.className = "week-course-list is-timed";
-    const courses = getDayCourses(key).map((course) => ({ ...course, type: "course" }));
-    const tasks = state.tasks
-      .filter((task) => dateKey(new Date(task.startAt)) === key)
-      .map((task) => ({ ...task, type: "task" }));
-    const plannedFocus = getAdoptedFocusBlocksForDay(key);
-    const items = [...courses, ...tasks, ...plannedFocus].sort((a, b) => a.startAt - b.startAt);
+    const dayWindowStart = new Date(day.getFullYear(), day.getMonth(), day.getDate(), dayStartHour).getTime();
+    const dayWindowEnd = new Date(day.getFullYear(), day.getMonth(), day.getDate(), dayEndHour).getTime();
+    const items = getPlannedItemsForDay(key)
+      .map((item) => {
+        const originalStartAt = item.startAt;
+        const originalEndAt = item.endAt;
+        const duration = Math.max(60000, originalEndAt - originalStartAt);
+        const startAt = originalEndAt <= dayWindowStart
+          ? dayWindowStart
+          : originalStartAt >= dayWindowEnd ? Math.max(dayWindowStart, dayWindowEnd - duration) : Math.max(originalStartAt, dayWindowStart);
+        const endAt = originalEndAt <= dayWindowStart
+          ? Math.min(dayWindowEnd, dayWindowStart + duration)
+          : originalStartAt >= dayWindowEnd ? dayWindowEnd : Math.min(originalEndAt, dayWindowEnd);
+        return { ...item, startAt, endAt };
+      });
+    hasPlannedItems ||= items.length > 0;
+    const laidOutItems = layoutOverlappingEvents(items);
     column.classList.toggle("is-empty", items.length === 0);
     column.classList.toggle("is-light", items.length === 1);
     column.classList.toggle("is-normal", items.length > 1 && items.length <= 3);
@@ -2012,47 +2715,88 @@ function renderWeekSchedule() {
       empty.textContent = "空";
       list.append(empty);
     } else {
-      items.forEach((item) => {
-        const itemStart = new Date(item.startAt);
-        const itemEnd = new Date(item.endAt);
-        const dayBounds = item.type === "planned-focus" ? getDayBounds(key) : null;
-        const startMinutes = dayBounds
-          ? (item.startAt - dayBounds.startAt) / 60000
-          : itemStart.getHours() * 60 + itemStart.getMinutes();
-        const endMinutes = dayBounds
-          ? (item.endAt - dayBounds.startAt) / 60000
-          : itemEnd.getHours() * 60 + itemEnd.getMinutes();
-        const visibleStart = Math.max(dayStartHour * 60, startMinutes);
-        const visibleEnd = Math.min(dayEndHour * 60, Math.max(endMinutes, startMinutes + 30));
-        const top = (visibleStart - dayStartHour * 60) / totalMinutes * 100;
-        const height = Math.max(6, (visibleEnd - visibleStart) / totalMinutes * 100);
+      const groups = new Map();
+      laidOutItems.forEach((item) => {
+        if (!groups.has(item.overlapGroupId)) groups.set(item.overlapGroupId, []);
+        groups.get(item.overlapGroupId).push(item);
+      });
+      const renderBlock = (item, laneIndex = item.laneIndex, laneCount = item.laneCount) => {
+        const visibleStart = (item.startAt - dayWindowStart) / 60000;
+        const visibleEnd = (item.endAt - dayWindowStart) / 60000;
+        const top = visibleStart / totalMinutes * 100;
+        const height = (visibleEnd - visibleStart) / totalMinutes * 100;
+        const visibleLaneCount = Math.min(3, laneCount);
+        const gapPercent = visibleLaneCount > 1 ? 1.5 : 0;
+        const widthPercent = (100 - gapPercent * (visibleLaneCount - 1)) / visibleLaneCount;
         const block = document.createElement("button");
         block.type = "button";
         block.className = `week-block is-${item.type}`;
+        if (visibleEnd - visibleStart < 30) block.classList.add("is-compact");
         const color = getTaskColor(item.color || (item.type === "course" ? "sky" : "sage"));
         block.style.setProperty("--week-block-bg", color.bg);
         block.style.setProperty("--week-block-border", color.border);
         block.style.setProperty("--week-block-ink", color.ink);
-        block.style.setProperty("--event-top", `${Math.min(94, Math.max(0, top))}%`);
-        block.style.setProperty("--event-height", `${Math.min(100 - Math.min(94, Math.max(0, top)), height)}%`);
+        block.style.setProperty("--event-top", `${Math.min(100, Math.max(0, top))}%`);
+        block.style.setProperty("--event-height", `${Math.max(0.1, Math.min(100 - Math.min(100, Math.max(0, top)), height))}%`);
+        block.style.setProperty("--event-left", `${laneIndex * (widthPercent + gapPercent)}%`);
+        block.style.setProperty("--event-width", `${widthPercent}%`);
+        const detailItem = item.detailItem || item;
         const blockTime = document.createElement("strong");
-        blockTime.textContent = formatClock(item.startAt);
+        blockTime.textContent = formatClock(detailItem.startAt);
         const blockTitle = document.createElement("span");
         blockTitle.textContent = item.title;
         block.append(blockTime, blockTitle);
         if (item.type === "planned-focus") {
           const blockType = document.createElement("small");
-          blockType.textContent = item.orphaned ? "计划专注 · 原任务已删除" : "计划专注";
+          const sprintLabel = item.planningMode === "deadline-sprint" ? " · 冲刺" : "";
+          blockType.textContent = item.orphaned ? `计划专注${sprintLabel} · 原任务已删除` : `计划专注${sprintLabel}`;
           block.append(blockType);
-          block.setAttribute("aria-label", `计划专注 ${item.title}，${formatClock(item.startAt)} 到 ${formatClock(item.endAt)}`);
+          block.setAttribute("aria-label", `计划专注 ${item.title}，${formatClock(detailItem.startAt)} 到 ${formatClock(detailItem.endAt)}`);
         }
-        block.addEventListener("click", () => showEventDetail(item));
+        block.addEventListener("click", () => showEventDetail(detailItem));
         list.append(block);
+      };
+      groups.forEach((group) => {
+        const laneCount = Math.max(...group.map((item) => item.laneCount));
+        if (laneCount <= 3) {
+          group.forEach((item) => renderBlock(item));
+          return;
+        }
+        const overflowDisplay = buildWeekOverflowDisplay(group, 3);
+        overflowDisplay.eventSegments.forEach((segment) => {
+          renderBlock({ ...segment.item, startAt: segment.startAt, endAt: segment.endAt }, segment.laneIndex, segment.laneCount);
+        });
+        overflowDisplay.summaries.forEach((summary) => {
+          const visibleStart = (summary.startAt - dayWindowStart) / 60000;
+          const visibleEnd = (summary.endAt - dayWindowStart) / 60000;
+          const summaryBlock = document.createElement("button");
+          summaryBlock.type = "button";
+          summaryBlock.className = "week-block is-overlap-summary";
+          summaryBlock.style.setProperty("--event-top", `${visibleStart / totalMinutes * 100}%`);
+          summaryBlock.style.setProperty("--event-height", `${Math.max(0.1, (visibleEnd - visibleStart) / totalMinutes * 100)}%`);
+          summaryBlock.style.setProperty("--event-left", `${2 * ((100 - 3) / 3 + 1.5)}%`);
+          summaryBlock.style.setProperty("--event-width", `${(100 - 3) / 3}%`);
+          const summaryTitle = document.createElement("strong");
+          const summaryHint = document.createElement("span");
+          summaryTitle.textContent = `+${summary.hiddenCount} 项`;
+          summaryHint.textContent = "查看全部";
+          summaryBlock.append(summaryTitle, summaryHint);
+          summaryBlock.setAttribute("aria-label", `${summary.events.length} 项重叠安排，查看全部`);
+          summaryBlock.addEventListener("click", () => showWeekOverlapSummary(summary.events));
+          list.append(summaryBlock);
+        });
       });
     }
 
     column.append(list);
     els.weekBoard.append(column);
+  }
+  els.weekBoard.closest(".week-schedule")?.classList.toggle("is-empty-state", !hasPlannedItems);
+  if (options.releaseShiftLock) {
+    weekShiftInProgress = false;
+    syncWeekHeaderScroll();
+  } else {
+    syncWeekHeaderScroll();
   }
 }
 
@@ -2563,6 +3307,401 @@ function renderMemos() {
     actions.append(editButton, checkbox);
     item.append(content, actions);
     els.memoList.append(item);
+  });
+}
+
+function habitApi() {
+  return globalThis.Habits;
+}
+
+function setHabitStatus(message) {
+  if (els.habitStatus) els.habitStatus.textContent = String(message || "");
+}
+
+function updateHabitMetricFields() {
+  if (!els.habitMetricType) return;
+  const metricType = els.habitMetricType.value;
+  const isBoolean = metricType === "boolean";
+  els.habitTargetField.hidden = isBoolean;
+  els.habitUnitField.hidden = isBoolean;
+  if (metricType === "duration" && (!els.habitUnit.value || els.habitUnit.value === "次")) els.habitUnit.value = "分钟";
+  if (metricType === "count" && (!els.habitUnit.value || els.habitUnit.value === "分钟")) els.habitUnit.value = "次";
+  if (isBoolean) els.habitTargetValue.value = "1";
+}
+
+function resetHabitForm() {
+  editingHabitId = null;
+  els.habitForm?.reset?.();
+  if (els.habitMetricType) els.habitMetricType.value = "boolean";
+  if (els.habitColor) els.habitColor.value = "sage";
+  if (els.habitTargetValue) els.habitTargetValue.value = "1";
+  if (els.habitUnit) els.habitUnit.value = "次";
+  if (els.habitIncludeInPlanner) els.habitIncludeInPlanner.checked = false;
+  els.habitDayInputs?.forEach((input) => { input.checked = true; });
+  if (els.habitEditorTitle) els.habitEditorTitle.textContent = "新增习惯";
+  if (els.habitSubmitButton) els.habitSubmitButton.textContent = "保存习惯";
+  if (els.habitArchiveButton) els.habitArchiveButton.hidden = true;
+  updateHabitMetricFields();
+}
+
+function openHabitEditor(habit = null) {
+  resetHabitForm();
+  if (habit) {
+    editingHabitId = String(habit.id);
+    els.habitEditorTitle.textContent = "编辑习惯";
+    els.habitSubmitButton.textContent = "保存修改";
+    els.habitArchiveButton.hidden = false;
+    els.habitTitle.value = habit.title;
+    els.habitMetricType.value = habit.metricType;
+    els.habitColor.value = habit.color;
+    els.habitTargetValue.value = String(habit.targetValue);
+    els.habitUnit.value = habit.unit;
+    if (els.habitIncludeInPlanner) els.habitIncludeInPlanner.checked = habit.includeInPlanner === true;
+    const days = new Set(habit.daysOfWeek);
+    els.habitDayInputs.forEach((input) => { input.checked = days.has(Number(input.value)); });
+    updateHabitMetricFields();
+  }
+  els.habitEditorSheet.hidden = false;
+  document.body.classList.add("has-habit-editor");
+  els.habitTitle?.focus?.();
+}
+
+function closeHabitEditor() {
+  if (els.habitEditorSheet) els.habitEditorSheet.hidden = true;
+  document.body.classList.remove("has-habit-editor");
+  resetHabitForm();
+}
+
+function persistHabitCollections(nextHabits, nextEntries, successMessage) {
+  const previousHabits = state.habits;
+  const previousEntries = state.habitEntries;
+  const previousSyncUpdatedAt = state.syncUpdatedAt;
+  state.habits = nextHabits;
+  state.habitEntries = nextEntries;
+  try {
+    const saved = saveState();
+    if (saved === false) throw new Error("HABIT_SAVE_FAILED");
+    renderHabits();
+    setHabitStatus(successMessage);
+    return true;
+  } catch (error) {
+    state.habits = previousHabits;
+    state.habitEntries = previousEntries;
+    state.syncUpdatedAt = previousSyncUpdatedAt;
+    renderHabits();
+    setHabitStatus("保存失败，请稍后重试");
+    return false;
+  }
+}
+
+function habitDraftFromForm() {
+  return {
+    title: String(els.habitTitle?.value || "").trim(),
+    color: els.habitColor?.value || "sage",
+    metricType: els.habitMetricType?.value || "boolean",
+    targetValue: Number(els.habitTargetValue?.value || 1),
+    unit: String(els.habitUnit?.value || "").trim(),
+    includeInPlanner: Boolean(els.habitIncludeInPlanner?.checked),
+    daysOfWeek: els.habitDayInputs.filter((input) => input.checked).map((input) => Number(input.value)),
+  };
+}
+
+function saveHabitFromForm(event, now = Date.now()) {
+  event?.preventDefault?.();
+  const api = habitApi();
+  const draft = habitDraftFromForm();
+  if (!draft.title || draft.daysOfWeek.length === 0) {
+    setHabitStatus("请填写习惯名称并至少选择一天");
+    return false;
+  }
+  const result = editingHabitId
+    ? api?.updateHabit?.({ habits: state.habits, habitId: editingHabitId, changes: draft, now })
+    : api?.createHabit?.({ habits: state.habits, draft, now, idFactory: () => crypto.randomUUID() });
+  if (!result?.ok) {
+    setHabitStatus("习惯没有保存，请检查填写内容");
+    return false;
+  }
+  const saved = persistHabitCollections(result.habits, state.habitEntries, editingHabitId ? "习惯已更新" : "习惯已创建");
+  if (saved) closeHabitEditor();
+  return saved;
+}
+
+function archiveEditingHabit(now = Date.now()) {
+  if (!editingHabitId) return false;
+  const habit = state.habits.find((item) => String(item.id) === editingHabitId);
+  if (!habit || !window.confirm(`确定归档习惯“${String(habit.title)}”吗？历史打卡仍会保留。`)) return false;
+  const result = habitApi()?.archiveHabit?.({ habits: state.habits, habitId: editingHabitId, now });
+  if (!result?.ok) return false;
+  const saved = persistHabitCollections(result.habits, state.habitEntries, "习惯已归档");
+  if (saved) closeHabitEditor();
+  return saved;
+}
+
+function setHabitValue(habitId, value, now = Date.now()) {
+  const habit = state.habits.find((item) => String(item.id) === String(habitId) && item.archivedAt === null);
+  if (!habit) return false;
+  const sessionValue = habitApi()?.getHabitSessionValue?.(state.activitySessions, habit, selectedHabitDate) || 0;
+  const result = habitApi()?.setHabitEntry?.({ entries: state.habitEntries, habit, dayKey: selectedHabitDate, value, now, sessionValue });
+  if (!result?.ok) return result?.reason === "NO_CHANGE";
+  return persistHabitCollections(state.habits, result.entries, Number(value) >= habit.targetValue ? "打卡完成" : "打卡已更新");
+}
+
+function renderHabitWeekStrip() {
+  if (!els.habitWeekStrip) return;
+  const labels = ["一", "二", "三", "四", "五", "六", "日"];
+  const selected = new Date(`${selectedHabitDate}T00:00:00`);
+  const start = getWeekStart(selected);
+  const today = dateKey();
+  els.habitWeekStrip.replaceChildren();
+  for (let index = 0; index < 7; index += 1) {
+    const day = new Date(start);
+    day.setDate(start.getDate() + index);
+    const key = dateKey(day);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "habit-day-button";
+    button.classList.toggle("is-selected", key === selectedHabitDate);
+    button.classList.toggle("is-today", key === today);
+    button.setAttribute("aria-pressed", String(key === selectedHabitDate));
+    const label = document.createElement("span");
+    label.textContent = `周${labels[index]}`;
+    const number = document.createElement("strong");
+    number.textContent = String(day.getDate());
+    button.append(label, number);
+    button.addEventListener("click", () => {
+      selectedHabitDate = key;
+      renderHabits();
+    });
+    els.habitWeekStrip.append(button);
+  }
+}
+
+function renderHabitValueControl(habit, entry) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "habit-value-control";
+  const currentValue = Number(entry?.value || 0);
+  if (habit.metricType === "boolean") {
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "habit-check-button";
+    const completed = currentValue >= habit.targetValue;
+    toggle.classList.toggle("is-complete", completed);
+    toggle.textContent = completed ? "取消打卡" : "完成打卡";
+    toggle.setAttribute("aria-pressed", String(completed));
+    toggle.addEventListener("click", () => setHabitValue(habit.id, completed ? 0 : 1, Date.now()));
+    wrapper.append(toggle);
+    return wrapper;
+  }
+  const step = habit.metricType === "duration" ? 5 : 1;
+  const decrease = document.createElement("button");
+  decrease.type = "button";
+  decrease.textContent = "−";
+  decrease.setAttribute("aria-label", `减少 ${habit.title}`);
+  const input = document.createElement("input");
+  input.type = "number";
+  input.min = "0";
+  input.step = String(step);
+  input.value = String(currentValue);
+  input.setAttribute("aria-label", `${habit.title} 当前${habit.unit || "数值"}`);
+  const increase = document.createElement("button");
+  increase.type = "button";
+  increase.textContent = "+";
+  increase.setAttribute("aria-label", `增加 ${habit.title}`);
+  const commit = (value) => setHabitValue(habit.id, Math.max(0, Number(value) || 0), Date.now());
+  decrease.addEventListener("click", () => commit(currentValue - step));
+  increase.addEventListener("click", () => commit(currentValue + step));
+  input.addEventListener("change", () => commit(input.value));
+  wrapper.append(decrease, input, increase);
+  return wrapper;
+}
+
+function habitRateLabel(rate) {
+  return rate === null ? "—" : `${Math.round(rate * 100)}%`;
+}
+
+function habitHeatLevel(rate) {
+  if (rate === null) return null;
+  if (rate <= 0) return 0;
+  if (rate <= 0.25) return 1;
+  if (rate <= 0.5) return 2;
+  if (rate <= 0.75) return 3;
+  return 4;
+}
+
+function renderHabitStatsFilter() {
+  if (!els.habitStatsFilter) return;
+  const activeHabits = habitApi().normalizeHabits(state.habits, Date.now()).filter((habit) => habit.archivedAt === null);
+  if (selectedHabitStatsFilter !== "all" && !activeHabits.some((habit) => habit.id === selectedHabitStatsFilter)) {
+    selectedHabitStatsFilter = "all";
+  }
+  const previous = selectedHabitStatsFilter;
+  els.habitStatsFilter.replaceChildren();
+  const all = document.createElement("option");
+  all.value = "all";
+  all.textContent = "全部习惯";
+  els.habitStatsFilter.append(all);
+  activeHabits.forEach((habit) => {
+    const option = document.createElement("option");
+    option.value = habit.id;
+    option.textContent = habit.title;
+    els.habitStatsFilter.append(option);
+  });
+  els.habitStatsFilter.value = previous;
+}
+
+function renderHabitWeekOverview(entries, todayKey) {
+  const weekStart = getWeekStart(new Date(`${todayKey}T00:00:00`));
+  const startKey = dateKey(weekStart);
+  const endKey = habitApi().addDaysToKey(startKey, 6);
+  const stats = habitApi().getHabitStatsRange(state.habits, entries, startKey, endKey, selectedHabitStatsFilter);
+  const scheduled = stats.reduce((total, day) => total + day.scheduled, 0);
+  const completed = stats.reduce((total, day) => total + day.completed, 0);
+  const rate = scheduled ? completed / scheduled : null;
+  els.habitWeekRate.textContent = habitRateLabel(rate);
+  els.habitWeekDetail.textContent = scheduled ? `${completed} / ${scheduled} 次达标` : "本周没有应打卡习惯";
+  els.habitWeekOverview.replaceChildren();
+  const labels = ["一", "二", "三", "四", "五", "六", "日"];
+  stats.forEach((day, index) => {
+    const item = document.createElement("div");
+    item.className = "habit-week-overview-day";
+    item.classList.toggle("is-empty", day.rate === null);
+    item.classList.toggle("is-today", day.dayKey === todayKey);
+    const bar = document.createElement("i");
+    bar.style.setProperty("--habit-rate", String(day.rate ?? 0));
+    const label = document.createElement("span");
+    label.textContent = `周${labels[index]}`;
+    const value = document.createElement("strong");
+    value.textContent = habitRateLabel(day.rate);
+    item.setAttribute("aria-label", `${day.dayKey}：${day.rate === null ? "无应打卡习惯" : `${day.completed}/${day.scheduled} 达标`}`);
+    item.append(bar, label, value);
+    els.habitWeekOverview.append(item);
+  });
+}
+
+function renderHabitTrend(entries, todayKey) {
+  const startKey = habitApi().addDaysToKey(todayKey, -13);
+  const stats = habitApi().getHabitStatsRange(state.habits, entries, startKey, todayKey, selectedHabitStatsFilter);
+  els.habitTrendChart.replaceChildren();
+  stats.forEach((day) => {
+    const item = document.createElement("div");
+    item.className = "habit-trend-day";
+    item.classList.toggle("is-empty", day.rate === null);
+    const bar = document.createElement("i");
+    bar.style.setProperty("--habit-rate", String(day.rate ?? 0));
+    const date = new Date(`${day.dayKey}T00:00:00`);
+    const label = document.createElement("span");
+    label.textContent = String(date.getDate());
+    item.setAttribute("aria-label", `${date.getMonth() + 1}月${date.getDate()}日：${day.rate === null ? "无安排" : habitRateLabel(day.rate)}`);
+    item.append(bar, label);
+    els.habitTrendChart.append(item);
+  });
+}
+
+function renderHabitCompletionHeatmap(entries, todayKey) {
+  const startKey = habitApi().addDaysToKey(todayKey, -89);
+  const stats = habitApi().getHabitStatsRange(state.habits, entries, startKey, todayKey, selectedHabitStatsFilter);
+  const startDate = new Date(`${startKey}T00:00:00`);
+  const leadingDays = (startDate.getDay() + 6) % 7;
+  els.habitHeatmap.replaceChildren();
+  for (let index = 0; index < leadingDays; index += 1) {
+    const spacer = document.createElement("i");
+    spacer.className = "habit-heatmap-spacer is-leading";
+    spacer.setAttribute("aria-hidden", "true");
+    els.habitHeatmap.append(spacer);
+  }
+  stats.forEach((day) => {
+    const cell = document.createElement("i");
+    const level = habitHeatLevel(day.rate);
+    cell.className = `habit-heatmap-cell ${level === null ? "is-empty" : `level-${level}`}`;
+    cell.dataset.dayKey = day.dayKey;
+    const date = new Date(`${day.dayKey}T00:00:00`);
+    cell.setAttribute("aria-label", `${date.getMonth() + 1}月${date.getDate()}日：${day.rate === null ? "无应打卡习惯" : `${habitRateLabel(day.rate)}，${day.completed}/${day.scheduled} 达标`}`);
+    els.habitHeatmap.append(cell);
+  });
+  for (let index = 0; index < 42; index += 1) {
+    const spacer = document.createElement("i");
+    spacer.className = "habit-heatmap-spacer is-trailing";
+    spacer.setAttribute("aria-hidden", "true");
+    els.habitHeatmap.append(spacer);
+  }
+  els.habitHeatmapRange.textContent = `${startDate.getMonth() + 1}月${startDate.getDate()}日–今天`;
+}
+
+function renderHabitStats(entries) {
+  if (!els.habitTodayRate || !els.habitWeekOverview || !els.habitHeatmap) return;
+  renderHabitStatsFilter();
+  const todayKey = dateKey();
+  const today = habitApi().getHabitDayStats(state.habits, entries, todayKey, selectedHabitStatsFilter);
+  els.habitTodayRate.textContent = habitRateLabel(today.rate);
+  els.habitTodayDetail.textContent = today.scheduled ? `${today.completed} / ${today.scheduled} 个习惯达标` : "今天没有应打卡习惯";
+  els.habitTodayProgress.value = Math.round((today.rate ?? 0) * 100);
+  els.habitTodayProgress.hidden = today.rate === null;
+  renderHabitWeekOverview(entries, todayKey);
+  const streak = habitApi().getHabitStreakStats(state.habits, entries, todayKey, selectedHabitStatsFilter);
+  els.habitCurrentStreak.textContent = String(streak.current);
+  els.habitLongestStreak.textContent = String(streak.longest);
+  renderHabitTrend(entries, todayKey);
+  renderHabitCompletionHeatmap(entries, todayKey);
+}
+
+function selectHabitStatsFilter(value) {
+  selectedHabitStatsFilter = value === "all" ? "all" : String(value || "");
+  renderHabits();
+}
+
+function renderHabits() {
+  if (!els.habitList || !habitApi()) return;
+  const activeHabits = habitApi().normalizeHabits(state.habits, Date.now()).filter((habit) => habit.archivedAt === null);
+  const hasActiveHabits = activeHabits.length > 0;
+  els.habitPanel?.classList.toggle("is-empty-state", !hasActiveHabits);
+  if (els.habitOnboarding) els.habitOnboarding.hidden = hasActiveHabits;
+  els.habitContentSections?.forEach((section) => { section.hidden = !hasActiveHabits; });
+  if (!hasActiveHabits) {
+    selectedHabitStatsFilter = "all";
+    els.habitList.replaceChildren();
+    els.habitEmpty.hidden = true;
+    return;
+  }
+  renderHabitWeekStrip();
+  const habits = habitApi().getHabitsForDay(state.habits, selectedHabitDate);
+  const entries = habitApi().normalizeHabitEntries(state.habitEntries, Date.now());
+  renderHabitStats(entries);
+  const summary = habitApi().getHabitCompletionSummary(state.habits, entries, selectedHabitDate);
+  const selected = new Date(`${selectedHabitDate}T00:00:00`);
+  els.habitSelectedDate.textContent = `${selected.getMonth() + 1}月${selected.getDate()}日`;
+  els.habitCompletionText.textContent = `${summary.completed} / ${summary.scheduled} 完成`;
+  els.habitCompletionProgress.value = Math.round(summary.rate * 100);
+  els.habitList.replaceChildren();
+  els.habitEmpty.hidden = habits.length > 0;
+  habits.forEach((habit) => {
+    const entry = entries.find((item) => item.habitId === habit.id && item.dayKey === selectedHabitDate) || null;
+    const completed = habitApi().isHabitComplete(habit, entry);
+    const color = getTaskColor(habit.color);
+    const card = document.createElement("article");
+    card.className = "habit-card";
+    card.classList.toggle("is-complete", completed);
+    card.style.setProperty("--habit-bg", color.bg);
+    card.style.setProperty("--habit-border", color.border);
+    card.style.setProperty("--habit-ink", color.ink);
+    const copy = document.createElement("div");
+    copy.className = "habit-card-copy";
+    const title = document.createElement("strong");
+    title.textContent = habit.title;
+    const meta = document.createElement("span");
+    const value = Number(entry?.value || 0);
+    meta.textContent = habit.metricType === "boolean"
+      ? completed ? "今日已完成" : "今日待完成"
+      : completed
+        ? `已达标 · ${value}/${habit.targetValue} ${habit.unit}`
+        : `已完成 ${value}/${habit.targetValue} ${habit.unit}`;
+    copy.append(title, meta);
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.className = "habit-edit-button";
+    edit.textContent = "编辑";
+    edit.addEventListener("click", () => openHabitEditor(habit));
+    card.append(copy, renderHabitValueControl(habit, entry), edit);
+    els.habitList.append(card);
   });
 }
 
@@ -3211,6 +4350,7 @@ function renderWeekChart() {
 
   els.weekChartTotal.textContent = `${total === 0 ? "0分钟" : formatDuration(0, total * 60000)} · ${formatMonthDay(start)}-${formatMonthDay(end)}`;
   els.weekChart.innerHTML = "";
+  els.weekChart.closest(".week-chart-card")?.classList.toggle("is-empty-state", total === 0);
   values.forEach((minutes, index) => {
     const item = document.createElement("div");
     item.className = "week-bar-item";
@@ -3729,6 +4869,7 @@ function render() {
   renderWeekSchedule();
   renderDdl();
   renderMemos();
+  renderHabits();
   renderHeatmap();
   renderStreak();
   renderWidgets();
@@ -3766,7 +4907,676 @@ function getDailyPlanPreviewInput(now) {
   const fixedTaskIds = tasks
     .filter((task) => globalThis.DailyPlanner.isFixedTimeTask(task))
     .map((task) => String(task.id));
-  return { now: timestamp, tasks, courses, focusSessions, fixedTaskIds };
+  const habitApi = globalThis.Habits;
+  const todayKey = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, "0")}-${String(current.getDate()).padStart(2, "0")}`;
+  const entries = habitApi?.normalizeHabitEntries?.(state.habitEntries, timestamp) || [];
+  const habits = (habitApi?.getHabitsForDay?.(state.habits, todayKey) || [])
+    .filter((habit) => habit.includeInPlanner === true && habit.metricType !== "boolean")
+    .map((habit) => {
+      const entry = entries.find((item) => item.habitId === habit.id && item.dayKey === todayKey);
+      const value = Math.max(0, Number(entry?.value) || 0);
+      return {
+        id: habit.id,
+        title: habit.title,
+        color: habit.color,
+        metricType: habit.metricType,
+        targetValue: habit.targetValue,
+        currentValue: value,
+        remainingValue: Math.max(0, Number(habit.targetValue) - value),
+        completed: value >= Number(habit.targetValue),
+        includeInPlanner: true,
+        scheduledToday: true,
+      };
+    })
+    .filter((habit) => !habit.completed);
+  return { now: timestamp, tasks, habits, courses, focusSessions, fixedTaskIds };
+}
+
+function getDeadlineSprintEligibleTasks(now) {
+  const timestamp = Number(now);
+  const planner = globalThis.DailyPlanner;
+  if (!Number.isFinite(timestamp) || !planner || typeof planner.getTaskDeadlineAt !== "function") return [];
+  return (Array.isArray(state.tasks) ? state.tasks : [])
+    .filter((task) => task && task.done !== true)
+    .map((task) => ({ task, deadlineAt: planner.getTaskDeadlineAt(task, timestamp) }))
+    .filter(({ deadlineAt }) => Number.isFinite(deadlineAt))
+    .sort((a, b) => a.deadlineAt - b.deadlineAt
+      || String(a.task.title || "").localeCompare(String(b.task.title || ""))
+      || String(a.task.id || "").localeCompare(String(b.task.id || "")));
+}
+
+function deadlineSprintRemainingText(deadlineAt, now) {
+  const minutes = Math.max(0, Math.ceil((Number(deadlineAt) - Number(now)) / 60000));
+  const days = Math.floor(minutes / (24 * 60));
+  const hours = Math.floor((minutes % (24 * 60)) / 60);
+  const remainder = minutes % 60;
+  if (days > 0) return `${days} 天 ${hours} 小时`;
+  if (hours > 0) return `${hours} 小时 ${remainder} 分钟`;
+  return `${remainder} 分钟`;
+}
+
+function deadlineSprintDateTime(timestamp) {
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(timestamp));
+}
+
+function resetDeadlineSprintMemory(clearTask = false) {
+  deadlineSprintPreview = null;
+  deadlineSprintSelectedIds = new Set();
+  deadlineSprintGenerating = false;
+  deadlineSprintError = null;
+  deadlineSprintAdopting = false;
+  deadlineSprintAdoptionError = null;
+  deadlineSprintAdoptionNotice = null;
+  deadlineSprintConflictIds = new Set();
+  if (clearTask) deadlineSprintTaskId = null;
+}
+
+function getDeadlineSprintCandidateInput(now, taskId) {
+  const timestamp = Number(now);
+  if (!Number.isFinite(timestamp)) throw new TypeError("截止前冲刺需要有效的当前时间");
+  const planner = globalThis.DailyPlanner;
+  if (!planner || typeof planner.getTaskDeadlineAt !== "function"
+    || typeof planner.buildDeadlineSprintCandidates !== "function"
+    || typeof planner.isFixedTimeTask !== "function") {
+    throw new Error("本地冲刺编排引擎未加载");
+  }
+  const selectedTask = (Array.isArray(state.tasks) ? state.tasks : [])
+    .find((task) => String(task?.id) === String(taskId) && task?.done !== true);
+  if (!selectedTask) return null;
+  const deadlineAt = planner.getTaskDeadlineAt(selectedTask, timestamp);
+  const rangeEndAt = Number.isFinite(deadlineAt) ? deadlineAt : timestamp;
+  const courses = (Array.isArray(state.courses) ? state.courses : [])
+    .filter((course) => Number(course?.startAt) < rangeEndAt && Number(course?.endAt) > timestamp)
+    .map(cloneDailyPlanInputItem);
+  const fixedTasks = (Array.isArray(state.tasks) ? state.tasks : [])
+    .filter((task) => task && task.done !== true && planner.isFixedTimeTask(task)
+      && Number(task.startAt) < rangeEndAt && Number(task.endAt) > timestamp)
+    .map(cloneDailyPlanInputItem);
+  const adoptedBlocks = [];
+  const seenBlocks = new Set();
+  Object.keys(state.dailyPlans && typeof state.dailyPlans === "object" ? state.dailyPlans : {})
+    .sort()
+    .forEach((dayKeyValue) => {
+      const plan = getAdoptedDailyPlan(dayKeyValue);
+      if (!plan) return;
+      plan.blocks.forEach((block) => {
+        if (Number(block.startAt) >= rangeEndAt || Number(block.endAt) <= timestamp) return;
+        const identity = `${String(block.id)}:${Number(block.startAt)}:${Number(block.endAt)}`;
+        if (seenBlocks.has(identity)) return;
+        seenBlocks.add(identity);
+        adoptedBlocks.push(cloneDailyPlanInputItem(block));
+      });
+    });
+  return {
+    now: timestamp,
+    task: cloneDailyPlanInputItem(selectedTask),
+    deadlineAt,
+    courses,
+    fixedTasks,
+    adoptedBlocks,
+  };
+}
+
+function appendDeadlineSprintEmpty(titleText, bodyText, className = "") {
+  if (!els.deadlineSprintContent) return;
+  const empty = document.createElement("div");
+  empty.className = `daily-plan-empty deadline-sprint-empty${className ? ` ${className}` : ""}`;
+  const title = document.createElement("strong");
+  const body = document.createElement("p");
+  title.textContent = titleText;
+  body.textContent = bodyText;
+  empty.append(title, body);
+  els.deadlineSprintContent.append(empty);
+}
+
+function appendDeadlineSprintWarnings(warnings) {
+  if (!els.deadlineSprintContent || !Array.isArray(warnings) || warnings.length === 0) return;
+  const list = document.createElement("ul");
+  list.className = "daily-plan-warnings deadline-sprint-warnings";
+  warnings.forEach((warning) => {
+    const item = document.createElement("li");
+    item.className = "daily-plan-warning";
+    item.dataset.warningCode = String(warning?.code || "SPRINT_WARNING");
+    const label = document.createElement("strong");
+    const message = document.createElement("span");
+    label.textContent = warning?.severity === "error" ? "错误" : warning?.severity === "info" ? "提示" : "提醒";
+    message.textContent = String(warning?.message || "请检查当前冲刺安排");
+    item.append(label, message);
+    list.append(item);
+  });
+  els.deadlineSprintContent.append(list);
+}
+
+function deadlineSprintSelectionStats() {
+  const candidates = Array.isArray(deadlineSprintPreview?.candidates) ? deadlineSprintPreview.candidates : [];
+  const selected = candidates.filter((candidate) => deadlineSprintSelectedIds.has(String(candidate.id)));
+  const minutes = selected.reduce((sum, candidate) => sum + Math.max(0, Number(candidate.minutes) || 0), 0);
+  const days = new Set(selected.map((candidate) => dailyPlanDayKey(candidate.startAt))).size;
+  return {
+    count: selected.length,
+    minutes,
+    days,
+    intensityLevel: minutes <= 90 ? "low" : minutes <= 180 ? "moderate" : "high",
+  };
+}
+
+function renderDeadlineSprintCandidates() {
+  if (!els.deadlineSprintContent || !els.deadlineSprintSelection) return;
+  els.deadlineSprintContent.replaceChildren();
+  const candidates = Array.isArray(deadlineSprintPreview?.candidates)
+    ? deadlineSprintPreview.candidates.slice(0, 8)
+    : [];
+
+  if (deadlineSprintError) {
+    appendDeadlineSprintEmpty("暂时无法生成冲刺时段", deadlineSprintError, "daily-plan-error");
+  } else if (deadlineSprintGenerating) {
+    appendDeadlineSprintEmpty("正在寻找截止前的空闲时间…", "所有计算都在本机完成。", "deadline-sprint-loading");
+  } else if (deadlineSprintAdoptionNotice && !deadlineSprintPreview) {
+    appendDeadlineSprintEmpty("冲刺时段已加入日程", "可以在时间轴和周日程中查看已采用的计划专注。", "deadline-sprint-success");
+  } else if (!deadlineSprintPreview) {
+    appendDeadlineSprintEmpty("选择一个任务开始冲刺", "生成后可以逐个选择想采用的专注时段。");
+  } else {
+    const summary = document.createElement("div");
+    summary.className = "deadline-sprint-summary";
+    const title = document.createElement("strong");
+    const meta = document.createElement("span");
+    title.textContent = `${deadlineSprintPreview.candidateCount || candidates.length} 个候选时段`;
+    meta.textContent = `截止 ${deadlineSprintDateTime(deadlineSprintPreview.deadlineAt)} · 共 ${Number(deadlineSprintPreview.totalCandidateMinutes) || 0} 分钟`;
+    summary.append(title, meta);
+    els.deadlineSprintContent.append(summary);
+
+    if (candidates.length > 0) {
+      const list = document.createElement("div");
+      list.className = "deadline-sprint-candidates";
+      candidates.forEach((candidate) => {
+        const row = document.createElement("label");
+        row.className = "deadline-sprint-candidate";
+        if (deadlineSprintConflictIds.has(String(candidate.id))) row.classList.add("is-conflict");
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.value = String(candidate.id);
+        checkbox.checked = deadlineSprintSelectedIds.has(String(candidate.id));
+        checkbox.disabled = deadlineSprintAdopting;
+        checkbox.setAttribute("aria-label", `选择第 ${candidate.sequence} 轮，${deadlineSprintDateTime(candidate.startAt)}`);
+        checkbox.addEventListener("change", () => toggleDeadlineSprintCandidate(candidate.id, checkbox.checked));
+        const copy = document.createElement("span");
+        const heading = document.createElement("strong");
+        const timing = document.createElement("span");
+        const detail = document.createElement("small");
+        heading.textContent = `第 ${candidate.sequence} 轮 · ${String(deadlineSprintPreview.title || candidate.title || "冲刺任务")}`;
+        timing.textContent = `${deadlineSprintDateTime(candidate.startAt)}–${dailyPlanClock(candidate.endAt)}`;
+        detail.textContent = `${candidate.minutes} 分钟${Number(candidate.minutes) < Number(deadlineSprintPreview.focusMinutes) ? " · 灵活时段" : ""}`;
+        copy.append(heading, timing, detail);
+        row.append(checkbox, copy);
+        list.append(row);
+      });
+      els.deadlineSprintContent.append(list);
+    } else {
+      appendDeadlineSprintEmpty("没有可用的冲刺时段", "可以调整固定安排，或选择其他截止任务。");
+    }
+    appendDeadlineSprintWarnings(deadlineSprintPreview.warnings);
+    if (deadlineSprintAdoptionError) {
+      appendDeadlineSprintEmpty("暂时无法采用冲刺时段", deadlineSprintAdoptionError, "daily-plan-error");
+    }
+  }
+
+  const stats = deadlineSprintSelectionStats();
+  els.deadlineSprintSelection.hidden = !deadlineSprintPreview;
+  els.deadlineSprintSelection.replaceChildren();
+  if (deadlineSprintPreview) {
+    const summary = document.createElement("strong");
+    summary.textContent = `已选择 ${stats.count} 轮，共 ${stats.minutes} 分钟 · 涉及 ${stats.days} 天`;
+    const intensity = document.createElement("span");
+    intensity.textContent = `强度：${stats.intensityLevel === "high" ? "高" : stats.intensityLevel === "moderate" ? "适中" : "低"}`;
+    els.deadlineSprintSelection.append(summary, intensity);
+    if (stats.intensityLevel === "high") {
+      const reminder = document.createElement("p");
+      reminder.textContent = "冲刺强度较高，记得为自己留出休息时间";
+      els.deadlineSprintSelection.append(reminder);
+    }
+  }
+  if (els.deadlineSprintAdoptButton) {
+    const canAdopt = Boolean(deadlineSprintPreview) && stats.count > 0 && !deadlineSprintGenerating && !deadlineSprintAdopting;
+    els.deadlineSprintAdoptButton.disabled = !canAdopt;
+    els.deadlineSprintAdoptButton.setAttribute("aria-disabled", String(!canAdopt));
+    els.deadlineSprintAdoptButton.setAttribute("aria-busy", String(deadlineSprintAdopting));
+    els.deadlineSprintAdoptButton.textContent = deadlineSprintAdopting ? "保存中…" : "采用到日程";
+  }
+  if (els.deadlineSprintAdoptionMessage) {
+    const message = deadlineSprintAdoptionError || deadlineSprintAdoptionNotice || "";
+    els.deadlineSprintAdoptionMessage.hidden = !message;
+    els.deadlineSprintAdoptionMessage.textContent = message;
+  }
+}
+
+function renderDeadlineSprintInterface(now = Date.now()) {
+  if (!els.deadlineSprintPanel || !els.deadlineSprintTaskSelect || !els.deadlineSprintGenerateButton) return;
+  const timestamp = Number(now);
+  const eligible = getDeadlineSprintEligibleTasks(timestamp);
+  const previousTaskId = deadlineSprintTaskId;
+  const selected = eligible.find(({ task }) => String(task.id) === String(deadlineSprintTaskId));
+  if (deadlineSprintTaskId && !selected) {
+    deadlineSprintTaskId = null;
+    deadlineSprintSelectedIds = new Set();
+    if (!deadlineSprintPreview) deadlineSprintError = "原先选择的任务已不可用，请重新选择";
+  }
+
+  els.deadlineSprintTaskSelect.replaceChildren();
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = eligible.length > 0 ? "请选择具有未来截止时间的任务" : "没有可用于冲刺的任务";
+  els.deadlineSprintTaskSelect.append(placeholder);
+  eligible.forEach(({ task, deadlineAt }) => {
+    const option = document.createElement("option");
+    option.value = String(task.id);
+    option.textContent = `${String(task.title || "未命名任务")} · ${deadlineSprintDateTime(deadlineAt)} 截止 · 剩余 ${deadlineSprintRemainingText(deadlineAt, timestamp)}`;
+    els.deadlineSprintTaskSelect.append(option);
+  });
+  els.deadlineSprintTaskSelect.value = deadlineSprintTaskId || "";
+  els.deadlineSprintTaskSelect.disabled = deadlineSprintGenerating || deadlineSprintAdopting || eligible.length === 0;
+
+  const active = eligible.find(({ task }) => String(task.id) === String(deadlineSprintTaskId));
+  els.deadlineSprintTaskMeta.textContent = active
+    ? `${String(active.task.title || "未命名任务")} · ${deadlineSprintDateTime(active.deadlineAt)} 截止 · 剩余 ${deadlineSprintRemainingText(active.deadlineAt, timestamp)}`
+    : eligible.length === 0 ? "当前没有未完成且具有未来截止时间的任务。" : "先选择一个任务，再生成候选冲刺时段。";
+  els.deadlineSprintGenerateButton.disabled = !active || deadlineSprintGenerating || deadlineSprintAdopting;
+  els.deadlineSprintGenerateButton.setAttribute("aria-disabled", String(els.deadlineSprintGenerateButton.disabled));
+  els.deadlineSprintGenerateButton.textContent = deadlineSprintGenerating ? "生成中…" : deadlineSprintPreview ? "重新生成冲刺时段" : "生成冲刺时段";
+  els.dailyPlanCard?.setAttribute("aria-busy", String(deadlineSprintGenerating || deadlineSprintAdopting));
+  els.dailyPlanCard?.classList.toggle("is-loading", deadlineSprintGenerating || deadlineSprintAdopting);
+  els.dailyPlanCard?.classList.toggle("is-error", Boolean(deadlineSprintError || deadlineSprintAdoptionError));
+  if (dailyPlanMode === "deadline-sprint" && els.dailyPlanStatus) {
+    els.dailyPlanStatus.textContent = deadlineSprintAdopting
+      ? "保存中"
+      : deadlineSprintGenerating
+      ? "生成中"
+      : deadlineSprintAdoptionError ? "采用失败"
+      : deadlineSprintAdoptionNotice ? "已加入日程"
+      : deadlineSprintError ? "生成失败" : deadlineSprintPreview ? "候选已生成" : "尚未生成";
+  }
+  renderDeadlineSprintCandidates();
+  return { eligible, invalidatedTaskId: previousTaskId && !selected ? previousTaskId : null };
+}
+
+function renderDailyPlanMode(now = Date.now()) {
+  const sprintMode = dailyPlanMode === "deadline-sprint";
+  if (els.dailyPlanBalancedModeButton) els.dailyPlanBalancedModeButton.setAttribute("aria-selected", String(!sprintMode));
+  if (els.dailyPlanSprintModeButton) els.dailyPlanSprintModeButton.setAttribute("aria-selected", String(sprintMode));
+  if (els.dailyPlanBalancedPanel) els.dailyPlanBalancedPanel.hidden = sprintMode;
+  if (els.deadlineSprintPanel) els.deadlineSprintPanel.hidden = !sprintMode;
+  if (sprintMode) renderDeadlineSprintInterface(now);
+  else renderDailyPlanPreview(now);
+}
+
+function setDailyPlanMode(mode, now = Date.now()) {
+  const nextMode = mode === "deadline-sprint" ? "deadline-sprint" : "balanced";
+  if (dailyPlanMode === nextMode) {
+    renderDailyPlanMode(now);
+    return false;
+  }
+  dailyPlanMode = nextMode;
+  if (nextMode === "balanced") resetDeadlineSprintMemory(true);
+  renderDailyPlanMode(now);
+  return true;
+}
+
+function selectDeadlineSprintTask(taskId, now = Date.now()) {
+  deadlineSprintTaskId = taskId === undefined || taskId === null || String(taskId) === "" ? null : String(taskId);
+  deadlineSprintPreview = null;
+  deadlineSprintSelectedIds = new Set();
+  deadlineSprintError = null;
+  deadlineSprintAdoptionError = null;
+  deadlineSprintAdoptionNotice = null;
+  deadlineSprintConflictIds = new Set();
+  renderDeadlineSprintInterface(now);
+}
+
+function toggleDeadlineSprintCandidate(candidateId, selected) {
+  const id = String(candidateId || "");
+  if (deadlineSprintAdopting) return false;
+  const exists = Array.isArray(deadlineSprintPreview?.candidates)
+    && deadlineSprintPreview.candidates.some((candidate) => String(candidate.id) === id);
+  if (!exists) return false;
+  if (selected) deadlineSprintSelectedIds.add(id);
+  else deadlineSprintSelectedIds.delete(id);
+  deadlineSprintConflictIds.delete(id);
+  deadlineSprintAdoptionError = null;
+  renderDeadlineSprintCandidates();
+  return true;
+}
+
+async function generateDeadlineSprintPreview(now) {
+  const timestamp = Number(now);
+  if (deadlineSprintGenerating || deadlineSprintAdopting || dailyPlanGenerating || dailyPlanAdopting) return false;
+  deadlineSprintGenerating = true;
+  deadlineSprintPreview = null;
+  deadlineSprintSelectedIds = new Set();
+  deadlineSprintError = null;
+  deadlineSprintAdoptionError = null;
+  deadlineSprintAdoptionNotice = null;
+  deadlineSprintConflictIds = new Set();
+  if (els.deadlineSprintTaskSelect) els.deadlineSprintTaskSelect.disabled = true;
+  if (els.deadlineSprintGenerateButton) {
+    els.deadlineSprintGenerateButton.disabled = true;
+    els.deadlineSprintGenerateButton.setAttribute("aria-disabled", "true");
+    els.deadlineSprintGenerateButton.textContent = "生成中…";
+  }
+  if (els.dailyPlanCard) els.dailyPlanCard.setAttribute("aria-busy", "true");
+  if (els.dailyPlanStatus) els.dailyPlanStatus.textContent = "生成中";
+  renderDeadlineSprintCandidates();
+  try {
+    await Promise.resolve();
+    const input = getDeadlineSprintCandidateInput(timestamp, deadlineSprintTaskId);
+    if (!input) {
+      deadlineSprintTaskId = null;
+      deadlineSprintError = "选择的任务已被删除或完成，请重新选择";
+      return false;
+    }
+    deadlineSprintPreview = globalThis.DailyPlanner.buildDeadlineSprintCandidates(input);
+    return true;
+  } catch (error) {
+    console.error("Deadline sprint preview failed:", error);
+    deadlineSprintError = "生成冲刺时段失败，请稍后重试";
+    return false;
+  } finally {
+    deadlineSprintGenerating = false;
+    renderDeadlineSprintInterface(timestamp);
+  }
+}
+
+function deadlineSprintIntervalsOverlap(left, right) {
+  return Number(left?.startAt) < Number(right?.endAt) && Number(left?.endAt) > Number(right?.startAt);
+}
+
+function deadlineSprintBlockMatchesCandidate(block, candidate) {
+  return String(block?.id || "") === String(candidate?.id || "")
+    && String(block?.taskId || "") === String(candidate?.taskId || "")
+    && Number(block?.startAt) === Number(candidate?.startAt)
+    && Number(block?.endAt) === Number(candidate?.endAt)
+    && Number(block?.minutes) === Number(candidate?.minutes)
+    && normalizeDailyPlanBlockMode(block?.planningMode) === "deadline-sprint"
+    && String(block?.sprintId || "") === String(candidate?.sprintId || "")
+    && Number(block?.deadlineAt) === Number(candidate?.deadlineAt)
+    && Number(block?.sequence) === Number(candidate?.sequence);
+}
+
+function getCurrentAdoptedDailyPlanBlocks() {
+  const blocks = [];
+  Object.keys(state.dailyPlans && typeof state.dailyPlans === "object" && !Array.isArray(state.dailyPlans) ? state.dailyPlans : {})
+    .sort()
+    .forEach((dayKeyValue) => {
+      const plan = getAdoptedDailyPlan(dayKeyValue);
+      if (!plan) return;
+      plan.blocks.forEach((block) => blocks.push({ ...block, planDayKey: dayKeyValue }));
+    });
+  return blocks;
+}
+
+function validateDeadlineSprintSelection(now) {
+  const timestamp = Number(now);
+  const preview = deadlineSprintPreview;
+  const candidates = Array.isArray(preview?.candidates) ? preview.candidates : [];
+  const candidateById = new Map(candidates.map((candidate) => [String(candidate?.id || ""), candidate]));
+  const selected = [...deadlineSprintSelectedIds]
+    .map((id) => candidateById.get(String(id)))
+    .filter(Boolean);
+  const conflictIds = new Set();
+  const duplicateIds = new Set();
+  if (!Number.isFinite(timestamp) || !preview || selected.length === 0) {
+    return { ok: false, reason: "no-selection", selected: [], conflictIds, duplicateIds };
+  }
+
+  const taskId = String(preview.taskId || "");
+  const task = (Array.isArray(state.tasks) ? state.tasks : [])
+    .find((item) => String(item?.id || "") === taskId);
+  const planner = globalThis.DailyPlanner;
+  const currentDeadlineAt = task && task.done !== true && planner && typeof planner.getTaskDeadlineAt === "function"
+    ? planner.getTaskDeadlineAt(task, timestamp)
+    : null;
+  if (!task || task.done === true || !Number.isFinite(currentDeadlineAt)
+    || Number(currentDeadlineAt) !== Number(preview.deadlineAt)) {
+    selected.forEach((candidate) => conflictIds.add(String(candidate.id)));
+    return { ok: false, reason: "task-changed", selected, conflictIds, duplicateIds };
+  }
+
+  const adoptedBlocks = getCurrentAdoptedDailyPlanBlocks();
+  const adoptedById = new Map(adoptedBlocks.map((block) => [String(block.id), block]));
+  const courses = Array.isArray(state.courses) ? state.courses : [];
+  const breakMinutes = Math.max(0, Number(preview.breakMinutes) || 0);
+  const fixedTasks = (Array.isArray(state.tasks) ? state.tasks : [])
+    .filter((item) => item && item.done !== true && planner.isFixedTimeTask(item));
+  selected.forEach((candidate) => {
+    const id = String(candidate?.id || "");
+    const startAt = Number(candidate?.startAt);
+    const endAt = Number(candidate?.endAt);
+    const minutes = Number(candidate?.minutes);
+    const internallyValid = id
+      && String(candidate?.taskId || "") === taskId
+      && String(candidate?.sprintId || "") === String(preview.sprintId || "")
+      && Number(candidate?.deadlineAt) === Number(preview.deadlineAt)
+      && Number.isFinite(startAt) && Number.isFinite(endAt) && endAt > startAt
+      && Number.isFinite(minutes) && minutes > 0
+      && minutes === Math.round((endAt - startAt) / 60000)
+      && Number.isFinite(Number(candidate?.sequence)) && Number(candidate.sequence) > 0
+      && startAt > timestamp && endAt <= currentDeadlineAt;
+    if (!internallyValid) {
+      conflictIds.add(id);
+      return;
+    }
+    const sameIdBlock = adoptedById.get(id);
+    if (sameIdBlock) {
+      if (deadlineSprintBlockMatchesCandidate(sameIdBlock, candidate)) duplicateIds.add(id);
+      else conflictIds.add(id);
+      return;
+    }
+    const conflictsWithAdopted = adoptedBlocks.some((block) => {
+      if (deadlineSprintIntervalsOverlap(candidate, block)) return true;
+      if (String(block.planningMode) !== "deadline-sprint" || String(block.sprintId) !== String(candidate.sprintId)) return false;
+      const gap = Math.max(Number(candidate.startAt), Number(block.startAt))
+        - Math.min(Number(candidate.endAt), Number(block.endAt));
+      return gap < breakMinutes * 60000;
+    });
+    if (courses.some((course) => deadlineSprintIntervalsOverlap(candidate, course))
+      || fixedTasks.some((fixedTask) => deadlineSprintIntervalsOverlap(candidate, fixedTask))
+      || conflictsWithAdopted) {
+      conflictIds.add(id);
+    }
+  });
+
+  const selectedNew = selected
+    .filter((candidate) => !duplicateIds.has(String(candidate.id)) && !conflictIds.has(String(candidate.id)))
+    .sort((a, b) => Number(a.startAt) - Number(b.startAt) || Number(a.endAt) - Number(b.endAt) || String(a.id).localeCompare(String(b.id)));
+  for (let index = 1; index < selectedNew.length; index += 1) {
+    const previous = selectedNew[index - 1];
+    const current = selectedNew[index];
+    if (deadlineSprintIntervalsOverlap(previous, current)
+      || (String(previous.sprintId) === String(current.sprintId)
+        && Number(current.startAt) - Number(previous.endAt) < breakMinutes * 60000)) {
+      conflictIds.add(String(previous.id));
+      conflictIds.add(String(current.id));
+    }
+  }
+  return {
+    ok: conflictIds.size === 0,
+    reason: conflictIds.size ? "schedule-changed" : null,
+    selected,
+    conflictIds,
+    duplicateIds,
+  };
+}
+
+function cloneDailyPlanValue(value) {
+  return typeof structuredClone === "function" ? structuredClone(value) : JSON.parse(JSON.stringify(value));
+}
+
+function deadlineSprintPlanWindow(dayKeyValue, blocks, existingWindow = null) {
+  const bounds = getDayBounds(dayKeyValue);
+  if (!bounds) return null;
+  const dayStart = new Date(bounds.startAt);
+  const defaultStartAt = new Date(dayStart.getFullYear(), dayStart.getMonth(), dayStart.getDate(), 7).getTime();
+  const defaultEndAt = new Date(dayStart.getFullYear(), dayStart.getMonth(), dayStart.getDate(), 22).getTime();
+  const blockStartAt = Math.min(...blocks.map((block) => Number(block.startAt)));
+  const blockEndAt = Math.max(...blocks.map((block) => Number(block.endAt)));
+  const oldStartAt = Number(existingWindow?.startAt);
+  const oldEndAt = Number(existingWindow?.endAt);
+  const oldPlanningStartAt = Number(existingWindow?.planningStartAt);
+  const hasExisting = Number.isFinite(oldStartAt) && Number.isFinite(oldEndAt) && oldEndAt > oldStartAt
+    && Number.isFinite(oldPlanningStartAt);
+  return {
+    startAt: hasExisting ? Math.min(oldStartAt, blockStartAt) : defaultStartAt,
+    endAt: hasExisting ? Math.max(oldEndAt, blockEndAt) : defaultEndAt,
+    planningStartAt: hasExisting ? Math.min(oldPlanningStartAt, blockStartAt) : blockStartAt,
+  };
+}
+
+function mergeDeadlineSprintBlocksIntoPlans(validation, adoptedAt) {
+  const timestamp = Number(adoptedAt);
+  const preview = deadlineSprintPreview;
+  if (!validation?.ok || !Number.isFinite(timestamp) || !preview) return { ok: false, changed: false };
+  const selectedNew = validation.selected.filter((candidate) => !validation.duplicateIds.has(String(candidate.id)));
+  if (selectedNew.length === 0) return { ok: true, changed: false, plans: state.dailyPlans };
+  const grouped = new Map();
+  selectedNew.forEach((candidate) => {
+    const dayKeyValue = dailyPlanDayKey(candidate.startAt);
+    if (!grouped.has(dayKeyValue)) grouped.set(dayKeyValue, []);
+    grouped.get(dayKeyValue).push(candidate);
+  });
+  const nextPlans = { ...(state.dailyPlans && typeof state.dailyPlans === "object" ? state.dailyPlans : {}) };
+  grouped.forEach((candidates, dayKeyValue) => {
+    const existing = getAdoptedDailyPlan(dayKeyValue);
+    const existingBlocks = existing ? existing.blocks.map(cloneDailyPlanValue) : [];
+    const byId = new Map(existingBlocks.map((block) => [String(block.id), block]));
+    candidates.forEach((candidate) => {
+      if (byId.has(String(candidate.id))) return;
+      byId.set(String(candidate.id), {
+        id: String(candidate.id),
+        taskId: String(candidate.taskId),
+        title: String(candidate.title || preview.title || "冲刺任务"),
+        startAt: Number(candidate.startAt),
+        endAt: Number(candidate.endAt),
+        minutes: Number(candidate.minutes),
+        planningMode: "deadline-sprint",
+        sprintId: String(candidate.sprintId),
+        deadlineAt: Number(candidate.deadlineAt),
+        sequence: Number(candidate.sequence),
+      });
+    });
+    const blocks = [...byId.values()]
+      .sort((a, b) => Number(a.startAt) - Number(b.startAt) || Number(a.endAt) - Number(b.endAt) || String(a.id).localeCompare(String(b.id)));
+    const priorities = [];
+    const priorityTaskIds = new Set();
+    (existing?.priorities || []).forEach((priority) => {
+      const id = priority?.taskId === null || priority?.taskId === undefined ? "" : String(priority.taskId);
+      if (id && priorityTaskIds.has(id)) return;
+      if (id) priorityTaskIds.add(id);
+      priorities.push(cloneDailyPlanValue(priority));
+    });
+    if (!priorityTaskIds.has(String(preview.taskId))) {
+      if (priorities.length >= 5) priorities.length = 4;
+      priorities.push({
+        rank: priorities.length + 1,
+        taskId: String(preview.taskId),
+        title: String(preview.title || "冲刺任务"),
+        startAt: null,
+        deadlineAt: Number(preview.deadlineAt),
+        overdue: false,
+        reasons: ["截止前冲刺"],
+        planningMode: "deadline-sprint",
+      });
+    }
+    const warnings = [];
+    const warningKeys = new Set();
+    (existing?.warnings || []).forEach((warning) => {
+      const key = `${String(warning.code)}:${(warning.sourceIds || []).map(String).sort().join(",")}:${String(warning.message)}`;
+      if (warningKeys.has(key)) return;
+      warningKeys.add(key);
+      warnings.push(cloneDailyPlanValue(warning));
+    });
+    const window = deadlineSprintPlanWindow(dayKeyValue, blocks, existing?.window);
+    nextPlans[dayKeyValue] = {
+      version: 2,
+      mode: dailyPlanModeFromBlocks(blocks),
+      dayKey: dayKeyValue,
+      generated_at: existing ? existing.generated_at : Number(preview.generated_at),
+      adopted_at: timestamp,
+      window,
+      focusTargetMinutes: existing ? existing.focusTargetMinutes : Number(preview.focusMinutes),
+      priorities: priorities.slice(0, 5),
+      blocks,
+      warnings,
+    };
+  });
+  return { ok: true, changed: true, plans: nextPlans, dayKeys: [...grouped.keys()].sort() };
+}
+
+async function adoptDeadlineSprintSelection(adoptedAt) {
+  const timestamp = Number(adoptedAt);
+  if (deadlineSprintAdopting || deadlineSprintGenerating || dailyPlanAdopting || dailyPlanGenerating
+    || !Number.isFinite(timestamp) || deadlineSprintSelectedIds.size === 0) return false;
+  deadlineSprintAdopting = true;
+  deadlineSprintAdoptionError = null;
+  deadlineSprintAdoptionNotice = null;
+  deadlineSprintConflictIds = new Set();
+  renderDeadlineSprintCandidates();
+  if (els.dailyPlanCard) els.dailyPlanCard.setAttribute("aria-busy", "true");
+  if (els.dailyPlanStatus) els.dailyPlanStatus.textContent = "保存中";
+  await Promise.resolve();
+  try {
+    const validation = validateDeadlineSprintSelection(timestamp);
+    if (!validation.ok) {
+      deadlineSprintConflictIds = validation.conflictIds;
+      validation.conflictIds.forEach((id) => deadlineSprintSelectedIds.delete(String(id)));
+      deadlineSprintAdoptionError = validation.reason === "no-selection"
+        ? "请先选择至少一个冲刺时段"
+        : "部分时段已发生变化，请重新确认或重新生成";
+      return false;
+    }
+    const merged = mergeDeadlineSprintBlocksIntoPlans(validation, timestamp);
+    if (!merged.ok) {
+      deadlineSprintAdoptionError = "保存失败，请稍后重试";
+      return false;
+    }
+    if (merged.changed) {
+      const previousDailyPlans = state.dailyPlans;
+      const previousSyncUpdatedAt = state.syncUpdatedAt;
+      const previousAffectedPlans = Object.fromEntries((merged.dayKeys || []).map((dayKeyValue) => [
+        dayKeyValue,
+        Object.prototype.hasOwnProperty.call(previousDailyPlans, dayKeyValue)
+          ? cloneDailyPlanValue(previousDailyPlans[dayKeyValue])
+          : undefined,
+      ]));
+      try {
+        state.dailyPlans = merged.plans;
+        const result = saveState();
+        if (result === false) throw new Error("saveState returned false");
+      } catch (error) {
+        console.error("Deadline sprint adoption failed:", error);
+        const restoredPlans = { ...previousDailyPlans };
+        Object.entries(previousAffectedPlans).forEach(([dayKeyValue, plan]) => {
+          if (plan === undefined) delete restoredPlans[dayKeyValue];
+          else restoredPlans[dayKeyValue] = plan;
+        });
+        state.dailyPlans = restoredPlans;
+        state.syncUpdatedAt = previousSyncUpdatedAt;
+        deadlineSprintAdoptionError = "保存失败，请稍后重试";
+        return false;
+      }
+    }
+    resetDeadlineSprintMemory(true);
+    deadlineSprintAdoptionNotice = "冲刺时段已加入日程";
+    if (typeof renderTimeline === "function") renderTimeline();
+    if (typeof renderWeekSchedule === "function") renderWeekSchedule();
+    return true;
+  } finally {
+    deadlineSprintAdopting = false;
+    renderDeadlineSprintInterface(timestamp);
+  }
 }
 
 function dailyPlanClock(timestamp) {
@@ -3782,42 +5592,82 @@ function dailyPlanDayKey(timestamp = Date.now()) {
   return `${year}-${month}-${day}`;
 }
 
+function normalizeDailyPlanBlockMode(value) {
+  return String(value || "").toLowerCase() === "deadline-sprint" ? "deadline-sprint" : "balanced";
+}
+
+function dailyPlanModeFromBlocks(blocks) {
+  const modes = new Set((Array.isArray(blocks) ? blocks : []).map((block) => normalizeDailyPlanBlockMode(block?.planningMode)));
+  if (modes.has("deadline-sprint") && modes.has("balanced")) return "mixed";
+  if (modes.has("deadline-sprint")) return "deadline-sprint";
+  return "balanced";
+}
+
 function normalizeDailyPlanForDisplay(plan, expectedDayKey = null, requireAdopted = false) {
   if (!plan || typeof plan !== "object" || Array.isArray(plan)) return null;
+  const version = Number(plan.version) === 2 ? 2 : 1;
   const dayKeyValue = typeof plan.dayKey === "string" ? plan.dayKey : "";
   const generatedAt = Number(plan.generated_at);
   const adoptedAt = Number(plan.adopted_at);
   if (!dayKeyValue || (expectedDayKey && dayKeyValue !== expectedDayKey) || !Number.isFinite(generatedAt)) return null;
   if (requireAdopted && !Number.isFinite(adoptedAt)) return null;
   if (!plan.window || typeof plan.window !== "object" || Array.isArray(plan.window)) return null;
+  const windowStartAt = Number(plan.window.startAt);
+  const windowEndAt = Number(plan.window.endAt);
+  const planningStartAt = Number(plan.window.planningStartAt);
+  if (!Number.isFinite(windowStartAt) || !Number.isFinite(windowEndAt) || windowEndAt <= windowStartAt
+    || !Number.isFinite(planningStartAt)) return null;
   const focusTargetMinutes = Number(plan.focusTargetMinutes);
   if (!Number.isFinite(focusTargetMinutes) || focusTargetMinutes <= 0) return null;
+  const priorityLimit = version === 2 ? 5 : 3;
   const priorities = Array.isArray(plan.priorities) ? plan.priorities
     .filter((priority) => priority && typeof priority === "object")
-    .slice(0, 3)
+    .slice(0, priorityLimit)
     .map((priority, index) => ({
       rank: Number(priority.rank) || index + 1,
       taskId: priority.taskId === null || priority.taskId === undefined ? null : String(priority.taskId),
+      habitId: priority.habitId === null || priority.habitId === undefined ? null : String(priority.habitId),
+      planningEntityType: priority.planningEntityType === "habit" ? "habit" : "task",
       title: String(priority.title || "未命名任务"),
       startAt: Number.isFinite(Number(priority.startAt)) ? Number(priority.startAt) : null,
       deadlineAt: Number.isFinite(Number(priority.deadlineAt)) ? Number(priority.deadlineAt) : null,
       overdue: Boolean(priority.overdue),
       reasons: Array.isArray(priority.reasons) ? priority.reasons.map(String) : [],
+      planningMode: normalizeDailyPlanBlockMode(priority.planningMode),
     })) : [];
-  const blocks = Array.isArray(plan.blocks) ? plan.blocks
+  const rawBlocks = Array.isArray(plan.blocks) ? plan.blocks
     .filter((block) => block && typeof block === "object"
+      && String(block.id || "").trim()
+      && ((block.taskId !== null && block.taskId !== undefined && String(block.taskId).trim())
+        || (block.habitId !== null && block.habitId !== undefined && String(block.habitId).trim()))
       && Number.isFinite(Number(block.startAt))
       && Number.isFinite(Number(block.endAt))
-      && Number(block.endAt) > Number(block.startAt))
-    .slice(0, 3)
+      && Number(block.endAt) > Number(block.startAt)
+      && Number.isFinite(Number(block.minutes))
+      && Number(block.minutes) > 0
+      && (String(block.planningMode || "").toLowerCase() !== "deadline-sprint"
+        || (String(block.sprintId || "").trim()
+          && Number.isFinite(Number(block.deadlineAt))
+          && Number.isFinite(Number(block.sequence))
+          && Number(block.sequence) > 0)))
+    : [];
+  const blocks = rawBlocks
+    .slice(0, version === 2 ? rawBlocks.length : 3)
     .map((block) => ({
-      id: String(block.id || ""),
+      id: String(block.id),
       taskId: block.taskId === null || block.taskId === undefined ? null : String(block.taskId),
+      habitId: block.habitId === null || block.habitId === undefined ? null : String(block.habitId),
       title: String(block.title || "专注时段"),
       startAt: Number(block.startAt),
       endAt: Number(block.endAt),
-      minutes: Math.max(0, Number(block.minutes) || 0),
-    })) : [];
+      minutes: Number(block.minutes),
+      planningMode: normalizeDailyPlanBlockMode(block.planningMode),
+      ...(String(block.planningMode || "").toLowerCase() === "deadline-sprint" ? {
+        sprintId: String(block.sprintId || ""),
+        deadlineAt: Number(block.deadlineAt),
+        sequence: Number(block.sequence),
+      } : {}),
+    }));
   const warnings = Array.isArray(plan.warnings) ? plan.warnings
     .filter((warning) => warning && typeof warning === "object")
     .map((warning) => ({
@@ -3827,14 +5677,15 @@ function normalizeDailyPlanForDisplay(plan, expectedDayKey = null, requireAdopte
       sourceIds: Array.isArray(warning.sourceIds) ? warning.sourceIds.map(String) : [],
     })) : [];
   return {
-    version: Number(plan.version) || 1,
+    version,
+    mode: version === 2 ? dailyPlanModeFromBlocks(blocks) : "balanced",
     dayKey: dayKeyValue,
     generated_at: generatedAt,
     ...(Number.isFinite(adoptedAt) ? { adopted_at: adoptedAt } : {}),
     window: {
-      startAt: Number(plan.window.startAt),
-      endAt: Number(plan.window.endAt),
-      planningStartAt: Number(plan.window.planningStartAt),
+      startAt: windowStartAt,
+      endAt: windowEndAt,
+      planningStartAt,
     },
     focusTargetMinutes,
     priorities,
@@ -3873,6 +5724,9 @@ function getAdoptedFocusBlocksForDay(dayKeyValue) {
   const activeTaskIds = new Set((Array.isArray(state.tasks) ? state.tasks : [])
     .filter((task) => task?.id !== undefined && task?.id !== null)
     .map((task) => String(task.id)));
+  const activeHabitIds = new Set((Array.isArray(state.habits) ? state.habits : [])
+    .filter((habit) => habit?.archivedAt === null && habit?.id !== undefined && habit?.id !== null)
+    .map((habit) => String(habit.id)));
   const seenBlockIds = new Set();
   const blocks = [];
 
@@ -3887,7 +5741,8 @@ function getAdoptedFocusBlocksForDay(dayKeyValue) {
     plan.blocks.forEach((block) => {
       const id = String(block.id || "").trim();
       const taskId = block.taskId === null || block.taskId === undefined ? "" : String(block.taskId);
-      if (!id || !taskId || seenBlockIds.has(id)) return;
+      const habitId = block.habitId === null || block.habitId === undefined ? "" : String(block.habitId);
+      if (!id || (!taskId && !habitId) || seenBlockIds.has(id)) return;
       if (!Number.isFinite(block.startAt) || !Number.isFinite(block.endAt) || block.endAt <= block.startAt) return;
       if (!Number.isFinite(block.minutes) || block.minutes <= 0) return;
       const startAt = Math.max(block.startAt, bounds.startAt);
@@ -3897,6 +5752,7 @@ function getAdoptedFocusBlocksForDay(dayKeyValue) {
       blocks.push({
         id,
         taskId,
+        habitId: habitId || null,
         title: String(block.title || "计划专注"),
         startAt,
         endAt,
@@ -3905,8 +5761,10 @@ function getAdoptedFocusBlocksForDay(dayKeyValue) {
         originalEndAt: block.endAt,
         planDayKey: plan.dayKey,
         type: "planned-focus",
+        planningMode: block.planningMode,
+        sprintId: block.sprintId || "",
         color: "lavender",
-        orphaned: !activeTaskIds.has(taskId),
+        orphaned: habitId ? !activeHabitIds.has(habitId) : !activeTaskIds.has(taskId),
       });
     });
   });
@@ -3922,6 +5780,7 @@ function createAdoptedDailyPlan(preview, adoptedAt) {
     ...normalized,
     adopted_at: timestamp,
   };
+  if (completePlan.version !== 2) delete completePlan.mode;
   return typeof structuredClone === "function"
     ? structuredClone(completePlan)
     : JSON.parse(JSON.stringify(completePlan));
@@ -3980,7 +5839,7 @@ function appendDailyPlanPriorities(priorities) {
   els.dailyPlanContent.append(section);
 }
 
-function appendDailyPlanBlocks(blocks) {
+function appendDailyPlanBlocks(blocks, selectable = false) {
   if (blocks.length === 0) return;
   const section = document.createElement("section");
   section.className = "daily-plan-section";
@@ -3989,8 +5848,22 @@ function appendDailyPlanBlocks(blocks) {
   const list = document.createElement("div");
   list.className = "daily-plan-blocks";
   blocks.slice(0, 3).forEach((block) => {
-    const item = document.createElement("article");
+    const item = document.createElement(selectable ? "label" : "article");
     item.className = "daily-plan-block";
+    if (selectable) {
+      item.classList.add("is-selectable");
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = dailyPlanSelectedBlockIds.has(String(block.id));
+      checkbox.setAttribute("aria-label", `选择专注时段 ${String(block.title || "专注时段")}`);
+      checkbox.addEventListener("change", () => {
+        const id = String(block.id);
+        if (checkbox.checked) dailyPlanSelectedBlockIds.add(id);
+        else dailyPlanSelectedBlockIds.delete(id);
+        renderDailyPlanPreview(Number(dailyPlanPreview?.generated_at) || Date.now());
+      });
+      item.append(checkbox);
+    }
     const time = document.createElement("span");
     const title = document.createElement("strong");
     const duration = document.createElement("small");
@@ -4033,6 +5906,9 @@ function renderDailyPlanPreview(now = Date.now()) {
   const adoptedPlan = getAdoptedDailyPlan(todayKey);
   const displayPlan = preview || adoptedPlan;
   const hasValidPreview = hasDailyPlanContent(preview) && preview.dayKey === todayKey;
+  const selectedPreviewBlockCount = preview
+    ? preview.blocks.filter((block) => dailyPlanSelectedBlockIds.has(String(block.id))).length
+    : 0;
   const isBusy = dailyPlanGenerating || dailyPlanAdopting;
   els.dailyPlanCard.classList.toggle("is-loading", isBusy);
   els.dailyPlanCard.classList.toggle("is-error", Boolean(dailyPlanPreviewError || dailyPlanAdoptionError));
@@ -4042,7 +5918,7 @@ function renderDailyPlanPreview(now = Date.now()) {
   els.dailyPlanGenerateButton.textContent = displayPlan ? "重新编排" : "为我编排今天";
   if (els.dailyPlanAdoptButton) {
     els.dailyPlanAdoptButton.hidden = !hasValidPreview;
-    els.dailyPlanAdoptButton.disabled = !hasValidPreview || isBusy || Boolean(dailyPlanPreviewError);
+    els.dailyPlanAdoptButton.disabled = !hasValidPreview || selectedPreviewBlockCount === 0 || isBusy || Boolean(dailyPlanPreviewError);
     els.dailyPlanAdoptButton.setAttribute("aria-disabled", String(els.dailyPlanAdoptButton.disabled));
     els.dailyPlanAdoptButton.textContent = dailyPlanAdopting ? "保存中…" : "采用到日程";
   }
@@ -4090,7 +5966,7 @@ function renderDailyPlanPreview(now = Date.now()) {
   }
   appendDailyPlanSummary(displayPlan);
   appendDailyPlanPriorities(displayPlan.priorities.slice(0, 3));
-  appendDailyPlanBlocks(displayPlan.blocks.slice(0, 3));
+  appendDailyPlanBlocks(displayPlan.blocks.slice(0, 3), Boolean(preview));
   if (displayPlan.priorities.length > 0 && displayPlan.blocks.length === 0) {
     appendDailyPlanEmpty("暂时没有可用时段", "当前空闲段不足 20 分钟，可以先调整固定安排后重新编排。", "daily-plan-no-slots");
   }
@@ -4110,6 +5986,8 @@ async function generateDailyPlanPreview(now) {
     if (!planner || typeof planner.buildDailyPlan !== "function") throw new Error("本地编排引擎未加载");
     const input = getDailyPlanPreviewInput(now);
     dailyPlanPreview = planner.buildDailyPlan(input);
+    dailyPlanSelectedBlockIds = new Set((Array.isArray(dailyPlanPreview?.blocks) ? dailyPlanPreview.blocks : [])
+      .map((block) => String(block.id)));
     return true;
   } catch (error) {
     console.error("Daily plan preview failed:", error);
@@ -4123,7 +6001,13 @@ async function generateDailyPlanPreview(now) {
 
 async function adoptDailyPlanPreview(adoptedAt) {
   const timestamp = Number(adoptedAt);
-  const plan = createAdoptedDailyPlan(dailyPlanPreview, timestamp);
+  const selectedBlocks = Array.isArray(dailyPlanPreview?.blocks)
+    ? dailyPlanPreview.blocks.filter((block) => dailyPlanSelectedBlockIds.has(String(block.id)))
+    : [];
+  const selectedPreview = dailyPlanPreview && selectedBlocks.length > 0
+    ? { ...dailyPlanPreview, blocks: selectedBlocks }
+    : null;
+  const plan = createAdoptedDailyPlan(selectedPreview, timestamp);
   if (dailyPlanAdopting || dailyPlanGenerating || dailyPlanPreviewError || !plan) return false;
   dailyPlanAdopting = true;
   dailyPlanAdoptionError = null;
@@ -4139,6 +6023,7 @@ async function adoptDailyPlanPreview(adoptedAt) {
     const result = saveState();
     if (result === false) throw new Error("saveState returned false");
     dailyPlanPreview = null;
+    dailyPlanSelectedBlockIds = new Set();
     return true;
   } catch (error) {
     console.error("Daily plan adoption failed:", error);
@@ -4155,7 +6040,7 @@ async function adoptDailyPlanPreview(adoptedAt) {
 
 function renderHome() {
   if (!els.homeTodayMinutes) return;
-  renderDailyPlanPreview();
+  renderDailyPlanMode();
   const now = new Date();
   const todayKey = dateKey(now);
   const todayTasks = getTodayOpenTasks();
@@ -4416,7 +6301,7 @@ function setActiveView(viewName) {
   activeView = viewName;
   document.body.dataset.view = viewName;
   els.views.forEach((view) => view.classList.toggle("is-active", view.dataset.view === viewName));
-  const primaryView = ["tasks", "timeline", "week", "ddl", "stats", "screenTime", "finance", "heatmap", "settings"].includes(viewName)
+  const primaryView = ["tasks", "timeline", "week", "ddl", "stats", "screenTime", "finance", "habits", "heatmap", "settings"].includes(viewName)
     ? "profile"
     : viewName;
   els.navButtons.forEach((button) => {
@@ -4427,6 +6312,7 @@ function setActiveView(viewName) {
   if (viewName === "week") renderWeekSchedule();
   if (viewName === "ddl") renderDdl();
   if (viewName === "memo") renderMemos();
+  if (viewName === "habits") renderHabits();
   if (viewName === "settings") renderThemes();
   if (viewName === "screenTime") loadUsageStats();
   if (viewName === "finance") refreshPaymentAccess();
@@ -4434,8 +6320,28 @@ function setActiveView(viewName) {
 }
 
 els.startPauseButton.addEventListener("click", () => state.isRunning ? pauseTimer() : startTimer());
+els.timelineTaskSelect?.addEventListener("change", () => {
+  const canStart = Boolean(els.timelineTaskSelect.value);
+  els.timelineStartButton.disabled = !canStart;
+  els.timelineStartButton.setAttribute("aria-disabled", String(!canStart));
+});
+els.timelineStartButton?.addEventListener("click", () => startSelectedTaskActivity(Date.now()));
+els.timelineEndButton?.addEventListener("click", () => endCurrentTaskActivity(Date.now()));
+els.habitAddButton?.addEventListener("click", () => openHabitEditor());
+els.habitOnboardingButton?.addEventListener("click", () => openHabitEditor());
+els.habitStatsFilter?.addEventListener("change", () => selectHabitStatsFilter(els.habitStatsFilter.value));
+els.habitEditorBackdrop?.addEventListener("click", closeHabitEditor);
+els.habitEditorClose?.addEventListener("click", closeHabitEditor);
+els.habitMetricType?.addEventListener("change", updateHabitMetricFields);
+els.habitForm?.addEventListener("submit", (event) => saveHabitFromForm(event, Date.now()));
+els.habitArchiveButton?.addEventListener("click", () => archiveEditingHabit(Date.now()));
 els.dailyPlanGenerateButton.addEventListener("click", () => generateDailyPlanPreview(Date.now()));
 els.dailyPlanAdoptButton.addEventListener("click", () => adoptDailyPlanPreview(Date.now()));
+els.dailyPlanBalancedModeButton?.addEventListener("click", () => setDailyPlanMode("balanced", Date.now()));
+els.dailyPlanSprintModeButton?.addEventListener("click", () => setDailyPlanMode("deadline-sprint", Date.now()));
+els.deadlineSprintTaskSelect?.addEventListener("change", () => selectDeadlineSprintTask(els.deadlineSprintTaskSelect.value, Date.now()));
+els.deadlineSprintGenerateButton?.addEventListener("click", () => generateDeadlineSprintPreview(Date.now()));
+els.deadlineSprintAdoptButton?.addEventListener("click", () => adoptDeadlineSprintSelection(Date.now()));
 els.resetButton.addEventListener("click", resetTimer);
 els.fastFinishButton.addEventListener("click", fastFinishSession);
 els.plant.addEventListener("click", toggleFlower);
@@ -4633,10 +6539,23 @@ function shiftTimelineWeek(direction) {
 }
 
 function shiftWeekSchedule(direction) {
+  if (weekShiftInProgress || ![-1, 1].includes(Number(direction))) return false;
+  weekShiftInProgress = true;
   const date = new Date(`${selectedWeekDate}T00:00:00`);
   date.setDate(date.getDate() + direction * 7);
   selectedWeekDate = dateKey(date);
-  renderWeekSchedule();
+  renderWeekSchedule({ reposition: true, announce: true, releaseShiftLock: true });
+  return true;
+}
+
+function shiftMobileWeekDay(direction) {
+  if (!isMobileWeekSchedule() || ![-1, 1].includes(Number(direction))) return false;
+  const date = new Date(`${selectedWeekDate}T00:00:00`);
+  if (!Number.isFinite(date.getTime())) return false;
+  date.setDate(date.getDate() + Number(direction));
+  selectedWeekDate = dateKey(date);
+  renderWeekSchedule({ announceDay: true });
+  return true;
 }
 
 function shiftStatsWeek(direction) {
@@ -4657,17 +6576,113 @@ els.weekStrip.addEventListener("touchend", (event) => {
   shiftTimelineWeek(deltaX < 0 ? 1 : -1);
 }, { passive: true });
 
-let weekTouchStartX = null;
-els.weekBoard.addEventListener("touchstart", (event) => {
-  weekTouchStartX = event.touches[0].clientX;
-}, { passive: true });
-els.weekBoard.addEventListener("touchend", (event) => {
-  if (weekTouchStartX === null) return;
-  const deltaX = event.changedTouches[0].clientX - weekTouchStartX;
-  weekTouchStartX = null;
-  if (Math.abs(deltaX) < 48) return;
-  shiftWeekSchedule(deltaX < 0 ? 1 : -1);
-}, { passive: true });
+els.weekBoard?.addEventListener("scroll", syncWeekHeaderScroll, { passive: true });
+
+let weekMobileDayGesture = null;
+let weekMobileSwipeEndedAt = -Infinity;
+function startWeekMobileDayGesture(event) {
+  if (!isMobileWeekSchedule() || event?.isPrimary === false
+    || (event?.pointerType === "mouse" && event?.button !== 0)) return;
+  weekMobileDayGesture = {
+    pointerId: event.pointerId,
+    startX: Number(event.clientX),
+    startY: Number(event.clientY),
+    startTime: weekGestureTime(event),
+  };
+}
+
+function finishWeekMobileDayGesture(event) {
+  if (!weekMobileDayGesture || event.pointerId !== weekMobileDayGesture.pointerId) return false;
+  const gesture = weekMobileDayGesture;
+  weekMobileDayGesture = null;
+  const deltaX = Number(event.clientX) - gesture.startX;
+  const deltaY = Number(event.clientY) - gesture.startY;
+  const duration = weekGestureTime(event) - gesture.startTime;
+  const isHorizontalSwipe = Math.abs(deltaX) >= 50
+    && Math.abs(deltaX) > Math.abs(deltaY) * 1.4
+    && duration >= 0
+    && duration <= 600;
+  if (!isHorizontalSwipe) return false;
+  weekMobileSwipeEndedAt = Date.now();
+  return shiftMobileWeekDay(deltaX < 0 ? 1 : -1);
+}
+
+function cancelWeekMobileDayGesture(event) {
+  if (!weekMobileDayGesture
+    || (event?.pointerId !== undefined && event.pointerId !== weekMobileDayGesture.pointerId)) return;
+  weekMobileDayGesture = null;
+}
+
+els.weekBoard?.addEventListener("pointerdown", startWeekMobileDayGesture, { passive: true });
+els.weekBoard?.addEventListener("pointerup", finishWeekMobileDayGesture, { passive: true });
+els.weekBoard?.addEventListener("pointercancel", cancelWeekMobileDayGesture, { passive: true });
+els.weekBoard?.addEventListener("click", (event) => {
+  if (Date.now() - weekMobileSwipeEndedAt > 400) return;
+  event.preventDefault();
+  event.stopPropagation();
+}, true);
+
+let weekHeaderGesture = null;
+function weekGestureTime(event) {
+  const timestamp = Number(event?.timeStamp);
+  return Number.isFinite(timestamp) && timestamp >= 0 ? timestamp : Date.now();
+}
+
+function startWeekHeaderGesture(event) {
+  if (event?.isPrimary === false || (event?.pointerType === "mouse" && event?.button !== 0)) return;
+  weekHeaderGesture = {
+    pointerId: event.pointerId,
+    startX: Number(event.clientX),
+    startY: Number(event.clientY),
+    startTime: weekGestureTime(event),
+    horizontalIntent: false,
+  };
+  if (typeof els.weekDayHeaders?.setPointerCapture === "function") {
+    try { els.weekDayHeaders.setPointerCapture(event.pointerId); } catch {}
+  }
+  els.weekDayHeaders?.classList.add("is-gesture-active");
+}
+
+function moveWeekHeaderGesture(event) {
+  if (!weekHeaderGesture || event.pointerId !== weekHeaderGesture.pointerId) return;
+  const deltaX = Number(event.clientX) - weekHeaderGesture.startX;
+  const deltaY = Number(event.clientY) - weekHeaderGesture.startY;
+  weekHeaderGesture.horizontalIntent = Math.abs(deltaX) >= 12 && Math.abs(deltaX) > Math.abs(deltaY) * 1.4;
+}
+
+function finishWeekHeaderGesture(event) {
+  if (!weekHeaderGesture || event.pointerId !== weekHeaderGesture.pointerId) return false;
+  const gesture = weekHeaderGesture;
+  weekHeaderGesture = null;
+  if (typeof els.weekDayHeaders?.releasePointerCapture === "function") {
+    try { els.weekDayHeaders.releasePointerCapture(event.pointerId); } catch {}
+  }
+  els.weekDayHeaders?.classList.remove("is-gesture-active");
+  const deltaX = Number(event.clientX) - gesture.startX;
+  const deltaY = Number(event.clientY) - gesture.startY;
+  const duration = weekGestureTime(event) - gesture.startTime;
+  const isHorizontalSwipe = gesture.horizontalIntent
+    && Math.abs(deltaX) >= 50
+    && Math.abs(deltaX) > Math.abs(deltaY) * 1.4
+    && duration >= 0
+    && duration <= 600;
+  if (!isHorizontalSwipe || weekShiftInProgress || isMobileWeekSchedule()) return false;
+  return shiftWeekSchedule(deltaX < 0 ? 1 : -1);
+}
+
+function cancelWeekHeaderGesture(event) {
+  if (!weekHeaderGesture || (event?.pointerId !== undefined && event.pointerId !== weekHeaderGesture.pointerId)) return;
+  if (typeof els.weekDayHeaders?.releasePointerCapture === "function" && event?.pointerId !== undefined) {
+    try { els.weekDayHeaders.releasePointerCapture(event.pointerId); } catch {}
+  }
+  weekHeaderGesture = null;
+  els.weekDayHeaders?.classList.remove("is-gesture-active");
+}
+
+els.weekDayHeaders?.addEventListener("pointerdown", startWeekHeaderGesture);
+els.weekDayHeaders?.addEventListener("pointermove", moveWeekHeaderGesture);
+els.weekDayHeaders?.addEventListener("pointerup", finishWeekHeaderGesture);
+els.weekDayHeaders?.addEventListener("pointercancel", cancelWeekHeaderGesture);
 
 let statsTouchStartX = null;
 els.weekChart.addEventListener("touchstart", (event) => {
@@ -4766,3 +6781,6 @@ window.setInterval(() => {
   checkReminders();
   renderTasks();
 }, 30000);
+window.setInterval(() => {
+  if (activeView === "timeline") renderRunningActivity(Date.now());
+}, 1000);

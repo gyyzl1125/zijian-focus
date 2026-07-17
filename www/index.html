@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#111111" />
     <title>自见</title>
-    <link rel="manifest" href="./manifest.webmanifest?v=52" />
-    <link rel="icon" href="./icon.svg?v=52" />
-    <link rel="stylesheet" href="./styles.css?v=53" />
+    <link rel="manifest" href="./manifest.webmanifest?v=57" />
+    <link rel="icon" href="./icon.svg?v=57" />
+    <link rel="stylesheet" href="./styles.css?v=57" />
   </head>
   <body>
     <main class="app-shell">
@@ -39,16 +39,36 @@
               <div><p class="eyebrow">本地智能编排</p><h2>今日编排</h2></div>
               <span id="dailyPlanStatus" aria-live="polite">尚未生成</span>
             </div>
-            <div class="daily-plan-content" id="dailyPlanContent" aria-live="polite">
-              <div class="daily-plan-empty">
-                <strong>把散落的一天，轻轻排成可以完成的样子。</strong>
-                <p>本地读取任务、课程、DDL 与近期专注节奏，生成三个重点和合适的专注时段。</p>
+            <div class="daily-plan-mode" role="tablist" aria-label="今日编排模式">
+              <button id="dailyPlanBalancedModeButton" type="button" role="tab" aria-selected="true" aria-controls="dailyPlanBalancedPanel">均衡编排</button>
+              <button id="dailyPlanSprintModeButton" type="button" role="tab" aria-selected="false" aria-controls="deadlineSprintPanel">截止前冲刺</button>
+            </div>
+            <div id="dailyPlanBalancedPanel" role="tabpanel" aria-labelledby="dailyPlanBalancedModeButton">
+              <div class="daily-plan-content" id="dailyPlanContent" aria-live="polite">
+                <div class="daily-plan-empty">
+                  <strong>把散落的一天，轻轻排成可以完成的样子。</strong>
+                  <p>本地读取任务、课程、DDL 与近期专注节奏，生成三个重点和合适的专注时段。</p>
+                </div>
+              </div>
+              <div class="daily-plan-actions">
+                <button class="daily-plan-generate" id="dailyPlanGenerateButton" type="button" aria-controls="dailyPlanContent" aria-disabled="false">为我编排今天</button>
+                <button class="daily-plan-adopt" id="dailyPlanAdoptButton" type="button" disabled hidden aria-disabled="true">采用到日程</button>
+                <span class="daily-plan-next-stage" id="dailyPlanNextStage" aria-live="polite" hidden></span>
               </div>
             </div>
-            <div class="daily-plan-actions">
-              <button class="daily-plan-generate" id="dailyPlanGenerateButton" type="button" aria-controls="dailyPlanContent" aria-disabled="false">为我编排今天</button>
-              <button class="daily-plan-adopt" id="dailyPlanAdoptButton" type="button" disabled hidden aria-disabled="true">采用到日程</button>
-              <span class="daily-plan-next-stage" id="dailyPlanNextStage" aria-live="polite" hidden></span>
+            <div class="deadline-sprint-panel" id="deadlineSprintPanel" role="tabpanel" aria-labelledby="dailyPlanSprintModeButton" hidden>
+              <label class="deadline-sprint-task-field" for="deadlineSprintTaskSelect">
+                <span>选择冲刺任务</span>
+                <select id="deadlineSprintTaskSelect">
+                  <option value="">请选择具有未来截止时间的任务</option>
+                </select>
+              </label>
+              <p class="deadline-sprint-task-meta" id="deadlineSprintTaskMeta" aria-live="polite"></p>
+              <button class="deadline-sprint-generate" id="deadlineSprintGenerateButton" type="button" disabled aria-disabled="true" aria-controls="deadlineSprintContent">生成冲刺时段</button>
+              <div class="deadline-sprint-content" id="deadlineSprintContent" aria-live="polite"></div>
+              <div class="deadline-sprint-selection" id="deadlineSprintSelection" aria-live="polite" hidden></div>
+              <button class="daily-plan-adopt deadline-sprint-adopt" id="deadlineSprintAdoptButton" type="button" disabled aria-disabled="true">采用到日程</button>
+              <p class="deadline-sprint-adoption-message" id="deadlineSprintAdoptionMessage" aria-live="polite" hidden></p>
             </div>
           </article>
           <article class="next-card">
@@ -132,13 +152,13 @@
               <p class="eyebrow">Schedule</p>
               <h2>任务</h2>
             </div>
-            <div class="panel-actions">
-              <button class="icon-button notify-button" id="notifyButton" type="button" title="开启通知" aria-label="开启通知">
-                <span class="bell-icon" aria-hidden="true"></span>
+            <div class="panel-actions task-panel-actions" aria-label="任务提醒操作">
+              <button class="icon-button task-toolbar-button notify-button" id="notifyButton" type="button" title="开启通知" aria-label="开启通知">
+                <span class="bell-icon" aria-hidden="true"></span><span>通知</span>
               </button>
-              <button class="icon-button notification-test-button" id="testNotificationButton" type="button" title="测试系统提醒">测试</button>
-              <button class="icon-button notification-settings-button" id="notificationSettingsButton" type="button" title="打开系统通知设置">设置</button>
-              <button class="icon-button" id="clearDoneButton" type="button" title="清除已完成">✓</button>
+              <button class="icon-button task-toolbar-button notification-test-button" id="testNotificationButton" type="button" title="测试系统提醒"><span aria-hidden="true">◉</span><span>测试提醒</span></button>
+              <button class="icon-button task-toolbar-button notification-settings-button" id="notificationSettingsButton" type="button" title="打开系统通知设置"><span aria-hidden="true">⚙</span><span>通知设置</span></button>
+              <button class="icon-button task-toolbar-button" id="clearDoneButton" type="button" title="清除已完成"><span aria-hidden="true">⌫</span><span>清除完成</span></button>
             </div>
           </div>
 
@@ -188,7 +208,29 @@
 
       <section class="app-view" id="timelineView" data-view="timeline" aria-label="时间轴">
         <section class="timeline-card">
-          <div class="week-strip" id="weekStrip"></div>
+          <div class="week-strip" id="weekStrip" aria-label="选择实际记录日期"></div>
+          <section class="timeline-activity-control" aria-label="任务与习惯实际活动记录">
+            <div class="timeline-start-row">
+              <label for="timelineTaskSelect">开始执行</label>
+              <select id="timelineTaskSelect">
+                <option value="">选择任务或可执行习惯</option>
+              </select>
+              <button id="timelineStartButton" type="button" disabled aria-disabled="true">开始</button>
+            </div>
+            <p class="timeline-task-empty" id="timelineTaskEmpty" hidden>当前没有可开始的未完成任务。</p>
+            <article class="timeline-running-card" id="timelineRunningCard" hidden aria-live="polite">
+              <div>
+                <span>正在进行</span>
+                <strong id="timelineRunningTitle"></strong>
+                <small id="timelineRunningStarted"></small>
+              </div>
+              <div class="timeline-running-actions">
+                <strong id="timelineRunningElapsed">0分钟</strong>
+                <button id="timelineEndButton" type="button">结束</button>
+              </div>
+            </article>
+            <span class="visually-hidden" id="timelineActivityStatus" role="status" aria-live="polite"></span>
+          </section>
           <div class="timeline-summary">
             <div>
               <strong id="timelineDateTitle">今天</strong>
@@ -208,14 +250,18 @@
               <h2>周日程</h2>
             </div>
             <div class="panel-actions">
-              <button class="icon-button" id="prevWeekButton" type="button" title="上一周">‹</button>
+              <button class="icon-button" id="prevWeekButton" type="button" title="上一周" aria-label="上一周">‹</button>
               <button class="icon-button" id="importIcsButton" type="button">导入</button>
-              <button class="icon-button" id="nextWeekButton" type="button" title="下一周">›</button>
+              <button class="icon-button" id="nextWeekButton" type="button" title="下一周" aria-label="下一周">›</button>
             </div>
           </div>
           <input id="icsFileInput" type="file" accept=".ics,.csv,.json,.txt,text/calendar,text/csv,application/json,text/plain" hidden />
           <div class="week-range-title" id="weekRangeTitle">本周</div>
+          <p class="week-gesture-hint">点击日期查看当天计划</p>
+          <div class="week-day-headers" id="weekDayHeaders" aria-label="周日期栏"></div>
+          <p class="week-content-hint">上下浏览计划，左右滑动切换日期</p>
           <div class="week-board" id="weekBoard"></div>
+          <span class="visually-hidden" id="weekNavigationStatus" role="status" aria-live="polite"></span>
         </section>
       </section>
 
@@ -247,7 +293,8 @@
           <div class="memo-toolbar">
             <input id="memoSearch" type="search" placeholder="搜索标题、分类、内容" autocomplete="off" />
           </div>
-          <div class="memo-tags" id="memoTags"></div>
+          <div class="memo-tags" id="memoTags" aria-label="备忘分类，可横向滚动"></div>
+          <p class="memo-tags-hint">左右滑动查看全部分类</p>
           <div class="memo-list" id="memoList"></div>
         </section>
       </section>
@@ -365,6 +412,75 @@
             <div class="section-heading"><div><p class="eyebrow">Transactions</p><h3>最近流水</h3></div></div>
             <div class="finance-list" id="financeList"></div>
           </article>
+        </section>
+      </section>
+
+      <section class="app-view" id="habitView" data-view="habits" aria-label="习惯与今日打卡">
+        <section class="panel habit-panel" id="habitPanel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Habits</p>
+              <h2>习惯与今日打卡</h2>
+            </div>
+            <button class="small-add-button" id="habitAddButton" type="button" aria-label="新增习惯">+</button>
+          </div>
+          <section class="habit-onboarding" id="habitOnboarding" hidden>
+            <span aria-hidden="true">○</span>
+            <strong>从一个小习惯开始</strong>
+            <p>创建习惯后，这里会显示打卡、连续天数、趋势和热力图。</p>
+            <button type="button" id="habitOnboardingButton">创建第一个习惯</button>
+          </section>
+          <section class="habit-stats-card habit-today-card" data-habit-content aria-labelledby="habitTodayHeading">
+            <div class="habit-stats-heading">
+              <div><span class="habit-section-label">Today</span><h3 id="habitTodayHeading">今日完成率</h3></div>
+              <label class="habit-stats-filter">统计范围
+                <select id="habitStatsFilter" aria-label="筛选习惯统计">
+                  <option value="all">全部习惯</option>
+                </select>
+              </label>
+            </div>
+            <div class="habit-rate-row">
+              <strong id="habitTodayRate">—</strong>
+              <span id="habitTodayDetail">今天没有应打卡习惯</span>
+            </div>
+            <progress id="habitTodayProgress" max="100" value="0" aria-label="今日习惯完成率"></progress>
+          </section>
+          <div class="habit-week-strip" id="habitWeekStrip" data-habit-content aria-label="选择打卡日期"></div>
+          <section class="habit-stats-card habit-week-card" data-habit-content aria-labelledby="habitWeekHeading">
+            <div class="habit-stats-heading">
+              <div><span class="habit-section-label">This week</span><h3 id="habitWeekHeading">本周完成概览</h3></div>
+              <strong id="habitWeekRate">—</strong>
+            </div>
+            <p id="habitWeekDetail">本周没有应打卡习惯</p>
+            <div class="habit-week-overview" id="habitWeekOverview" aria-label="本周每日习惯完成率"></div>
+          </section>
+          <section class="habit-streak-grid" data-habit-content aria-label="连续打卡统计">
+            <article><span>当前连续天数</span><strong id="habitCurrentStreak">0</strong><small>个应打卡日</small></article>
+            <article><span>最长连续天数</span><strong id="habitLongestStreak">0</strong><small>个应打卡日</small></article>
+          </section>
+          <section class="habit-stats-card habit-trend-card" data-habit-content aria-labelledby="habitTrendHeading">
+            <div class="habit-stats-heading"><div><span class="habit-section-label">14 days</span><h3 id="habitTrendHeading">完成率趋势</h3></div></div>
+            <div class="habit-trend-chart" id="habitTrendChart" aria-label="最近十四天习惯完成率趋势"></div>
+          </section>
+          <section class="habit-stats-card habit-heatmap-card" data-habit-content aria-labelledby="habitHeatmapHeading">
+            <div class="habit-stats-heading">
+              <div><span class="habit-section-label">90 days</span><h3 id="habitHeatmapHeading">习惯完成热力图</h3></div>
+              <span class="habit-heatmap-range" id="habitHeatmapRange"></span>
+            </div>
+            <div class="habit-heatmap-scroller" id="habitHeatmapScroller">
+              <div class="habit-heatmap" id="habitHeatmap" aria-label="最近九十天习惯完成率"></div>
+            </div>
+            <div class="habit-heatmap-legend" aria-label="完成率图例"><span>低</span><i class="level-0"></i><i class="level-1"></i><i class="level-2"></i><i class="level-3"></i><i class="level-4"></i><span>高</span><i class="is-empty"></i><span>无安排</span></div>
+          </section>
+          <section class="habit-checkin-section" data-habit-content aria-labelledby="habitSelectedDate">
+            <div class="habit-day-summary">
+              <div><strong id="habitSelectedDate">今天</strong><span id="habitCompletionText">0 / 0 完成</span></div>
+              <progress id="habitCompletionProgress" max="100" value="0" aria-label="所选日期习惯完成率"></progress>
+            </div>
+            <div class="habit-list" id="habitList"></div>
+            <p class="habit-empty" id="habitEmpty" hidden>这一天没有安排习惯</p>
+          </section>
+          <span class="visually-hidden" id="habitStatus" role="status" aria-live="polite"></span>
         </section>
       </section>
 
@@ -491,6 +607,7 @@
             <button type="button" data-view-target="stats"><span><strong>统计</strong><small>专注趋势与任务概览</small></span><b>›</b></button>
             <button type="button" data-view-target="screenTime"><span><strong>屏幕使用</strong><small>应用时长与每日变化</small></span><b>›</b></button>
             <button type="button" data-view-target="finance"><span><strong>我的账本</strong><small>预算、分类与消费分析</small></span><b>›</b></button>
+            <button type="button" data-view-target="habits"><span><strong>习惯与今日打卡</strong><small>重复行为、本周安排和完成进度</small></span><b>›</b></button>
             <button type="button" data-view-target="heatmap"><span><strong>热力图与装扮</strong><small>火苗、皮肤和花朵</small></span><b>›</b></button>
             <button type="button" data-view-target="settings"><span><strong>设置与数据</strong><small>主题、轮播和本地备份</small></span><b>›</b></button>
           </div></div>
@@ -535,6 +652,36 @@
           <button class="add-task-button" id="memoSubmitButton" type="submit">记下</button>
           <button class="ghost-button memo-cancel-edit" id="memoCancelEditButton" type="button" hidden>取消修改</button>
           <button class="memo-delete-button" id="memoDeleteButton" type="button" hidden>删除备忘</button>
+        </form>
+      </article>
+    </div>
+
+    <div class="habit-editor-sheet" id="habitEditorSheet" hidden>
+      <button class="event-sheet-backdrop" id="habitEditorBackdrop" type="button" aria-label="关闭习惯编辑"></button>
+      <article class="habit-editor-card" role="dialog" aria-modal="true" aria-labelledby="habitEditorTitle">
+        <button class="event-sheet-close" id="habitEditorClose" type="button" aria-label="关闭">×</button>
+        <p class="eyebrow">Habit</p>
+        <h3 id="habitEditorTitle">新增习惯</h3>
+        <form class="habit-form" id="habitForm">
+          <label><span>习惯名称</span><input id="habitTitle" type="text" maxlength="60" autocomplete="off" required /></label>
+          <div class="habit-form-grid">
+            <label><span>记录类型</span><select id="habitMetricType"><option value="boolean">完成 / 未完成</option><option value="count">计数</option><option value="duration">时长</option></select></label>
+            <label><span>颜色</span><select id="habitColor"><option value="sage">鼠尾草</option><option value="sky">天空蓝</option><option value="peach">蜜桃</option><option value="lavender">薰衣草</option><option value="lemon">柠檬</option><option value="rose">玫瑰</option></select></label>
+            <label id="habitTargetField"><span>目标值</span><input id="habitTargetValue" type="number" min="0.1" step="0.1" value="1" /></label>
+            <label id="habitUnitField"><span>单位</span><input id="habitUnit" type="text" maxlength="16" value="次" /></label>
+          </div>
+          <fieldset class="habit-days-fieldset"><legend>重复日期</legend><div class="habit-day-options">
+            <label><input type="checkbox" name="habitDay" value="1" checked /><span>一</span></label>
+            <label><input type="checkbox" name="habitDay" value="2" checked /><span>二</span></label>
+            <label><input type="checkbox" name="habitDay" value="3" checked /><span>三</span></label>
+            <label><input type="checkbox" name="habitDay" value="4" checked /><span>四</span></label>
+            <label><input type="checkbox" name="habitDay" value="5" checked /><span>五</span></label>
+            <label><input type="checkbox" name="habitDay" value="6" checked /><span>六</span></label>
+            <label><input type="checkbox" name="habitDay" value="7" checked /><span>日</span></label>
+          </div></fieldset>
+          <label class="habit-planner-option"><input id="habitIncludeInPlanner" type="checkbox" /><span>未达标时加入今日编排建议</span></label>
+          <button class="primary-button" id="habitSubmitButton" type="submit">保存习惯</button>
+          <button class="habit-archive-button" id="habitArchiveButton" type="button" hidden>归档习惯</button>
         </form>
       </article>
     </div>
@@ -609,8 +756,10 @@
     </nav>
 
     <script src="./capacitor.js"></script>
-    <script src="./fflate.min.js?v=52"></script>
-    <script src="./daily-planner.js?v=53"></script>
-    <script src="./app.js?v=53"></script>
+    <script src="./fflate.min.js?v=57"></script>
+    <script src="./daily-planner.js?v=57"></script>
+    <script src="./activity-sessions.js?v=57"></script>
+    <script src="./habits.js?v=57"></script>
+    <script src="./app.js?v=57"></script>
   </body>
 </html>
