@@ -228,14 +228,18 @@
               <h2>周日程</h2>
             </div>
             <div class="panel-actions">
-              <button class="icon-button" id="prevWeekButton" type="button" title="上一周">‹</button>
+              <button class="icon-button" id="prevWeekButton" type="button" title="上一周" aria-label="上一周">‹</button>
               <button class="icon-button" id="importIcsButton" type="button">导入</button>
-              <button class="icon-button" id="nextWeekButton" type="button" title="下一周">›</button>
+              <button class="icon-button" id="nextWeekButton" type="button" title="下一周" aria-label="下一周">›</button>
             </div>
           </div>
           <input id="icsFileInput" type="file" accept=".ics,.csv,.json,.txt,text/calendar,text/csv,application/json,text/plain" hidden />
           <div class="week-range-title" id="weekRangeTitle">本周</div>
+          <p class="week-gesture-hint">在日期栏左右滑动切换周</p>
+          <div class="week-day-headers" id="weekDayHeaders" aria-label="周日期栏"></div>
+          <p class="week-content-hint">左右滑动查看本周其他日期</p>
           <div class="week-board" id="weekBoard"></div>
+          <span class="visually-hidden" id="weekNavigationStatus" role="status" aria-live="polite"></span>
         </section>
       </section>
 

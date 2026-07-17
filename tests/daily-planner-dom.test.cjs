@@ -71,6 +71,7 @@ function createHarness({ state, planner = DailyPlanner } = {}) {
     let dailyPlanAdopting = false;
     let dailyPlanAdoptionError = null;
     let dailyPlanPreviewNeedsRegeneration = false;
+    let dailyPlanSelectedBlockIds = new Set();
     ${previewSource}
     this.previewApi = {
       getInput: getDailyPlanPreviewInput,

@@ -119,6 +119,7 @@ let dailyPlanGenerating = false;
 let dailyPlanAdopting = false;
 let dailyPlanAdoptionError = null;
 let dailyPlanPreviewNeedsRegeneration = false;
+let dailyPlanSelectedBlockIds = new Set();
 let dailyPlanMode = "balanced";
 let deadlineSprintPreview = null;
 let deadlineSprintSelectedIds = new Set();
@@ -182,7 +183,9 @@ const els = {
   timelineStats: document.querySelector("#timelineStats"),
   timelineList: document.querySelector("#timelineList"),
   weekBoard: document.querySelector("#weekBoard"),
+  weekDayHeaders: document.querySelector("#weekDayHeaders"),
   weekRangeTitle: document.querySelector("#weekRangeTitle"),
+  weekNavigationStatus: document.querySelector("#weekNavigationStatus"),
   prevWeekButton: document.querySelector("#prevWeekButton"),
   nextWeekButton: document.querySelector("#nextWeekButton"),
   importIcsButton: document.querySelector("#importIcsButton"),
@@ -359,6 +362,8 @@ const els = {
 let activeView = "home";
 let selectedTimelineDate = dateKey();
 let selectedWeekDate = dateKey();
+let weekShiftInProgress = false;
+let weekScrollInitialized = false;
 let selectedStatsWeekDate = dateKey();
 let feedIndex = 0;
 let previewSkinId = null;
@@ -1327,6 +1332,7 @@ function deleteTasksByIds(taskIds, deletedAt) {
   state.dailyPlans = removeDeletedTaskReferencesFromPlans(state.dailyPlans, deletedIds, timestamp, revisionAt);
   if (dailyPlanReferencesAnyTask(dailyPlanPreview, deletedIds)) {
     dailyPlanPreview = null;
+    dailyPlanSelectedBlockIds = new Set();
     dailyPlanPreviewError = null;
     dailyPlanAdoptionError = null;
     dailyPlanPreviewNeedsRegeneration = true;
@@ -2030,18 +2036,30 @@ function layoutOverlappingEvents(events) {
       }
       return { ...event, laneIndex };
     });
-    const laneCount = laneEnds.length;
-    const visibleLaneCount = Math.min(3, laneCount);
-    const gapPercent = visibleLaneCount > 1 ? 1.5 : 0;
-    const widthPercent = (100 - gapPercent * (visibleLaneCount - 1)) / visibleLaneCount;
     const overlapGroupId = `week-overlap-${groupIndex}-${group[0].startAt}-${group.map((event) => String(event.id)).join("-")}`;
-    return assigned.map((event) => ({
-      ...event,
-      laneCount,
-      overlapGroupId,
-      widthPercent,
-      leftPercent: event.laneIndex * (widthPercent + gapPercent),
-    }));
+    return assigned.map((event) => {
+      const boundaries = [...new Set(group.flatMap((item) => [item.startAt, item.endAt]))]
+        .sort((a, b) => a - b);
+      let localConcurrency = 1;
+      for (let index = 0; index < boundaries.length - 1; index += 1) {
+        const startAt = boundaries[index];
+        const endAt = boundaries[index + 1];
+        if (endAt <= event.startAt || startAt >= event.endAt) continue;
+        const concurrent = group.filter((item) => item.startAt < endAt && item.endAt > startAt).length;
+        localConcurrency = Math.max(localConcurrency, concurrent);
+      }
+      const laneCount = Math.max(event.laneIndex + 1, localConcurrency);
+      const visibleLaneCount = Math.min(3, laneCount);
+      const gapPercent = visibleLaneCount > 1 ? 1.5 : 0;
+      const widthPercent = (100 - gapPercent * (visibleLaneCount - 1)) / visibleLaneCount;
+      return {
+        ...event,
+        laneCount,
+        overlapGroupId,
+        widthPercent,
+        leftPercent: event.laneIndex * (widthPercent + gapPercent),
+      };
+    });
   });
 }
 
@@ -2050,6 +2068,55 @@ function weekEventDisplayPriority(item) {
   if (item?.type === "task" && globalThis.DailyPlanner?.isFixedTimeTask?.(item)) return 1;
   if (item?.type === "planned-focus") return 2;
   return 3;
+}
+
+function buildWeekOverflowDisplay(group, maxLanes = 3) {
+  const items = Array.isArray(group) ? group.slice() : [];
+  const boundaries = [...new Set(items.flatMap((item) => [Number(item.startAt), Number(item.endAt)]))]
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b);
+  const eventSegments = [];
+  const summaries = [];
+  const appendEventSegment = (item, startAt, endAt, laneIndex, laneCount) => {
+    const previous = eventSegments.slice().reverse().find((segment) => segment.id === String(item.id));
+    if (previous && previous.id === String(item.id) && previous.endAt === startAt
+      && previous.laneIndex === laneIndex && previous.laneCount === laneCount) {
+      previous.endAt = endAt;
+      return;
+    }
+    eventSegments.push({ id: String(item.id), item, startAt, endAt, laneIndex, laneCount });
+  };
+  for (let index = 0; index < boundaries.length - 1; index += 1) {
+    const startAt = boundaries[index];
+    const endAt = boundaries[index + 1];
+    if (endAt <= startAt) continue;
+    const active = items.filter((item) => item.startAt < endAt && item.endAt > startAt);
+    if (active.length === 0) continue;
+    const prioritized = active.slice().sort((a, b) => weekEventDisplayPriority(a) - weekEventDisplayPriority(b)
+      || a.startAt - b.startAt || a.endAt - b.endAt || String(a.id).localeCompare(String(b.id)));
+    if (active.length <= maxLanes) {
+      const byLane = active.slice().sort((a, b) => a.laneIndex - b.laneIndex
+        || a.startAt - b.startAt || a.endAt - b.endAt || String(a.id).localeCompare(String(b.id)));
+      byLane.forEach((item, laneIndex) => appendEventSegment(item, startAt, endAt, laneIndex, byLane.length));
+      continue;
+    }
+    prioritized.slice(0, maxLanes - 1)
+      .forEach((item, laneIndex) => appendEventSegment(item, startAt, endAt, laneIndex, maxLanes));
+    const activeIds = prioritized.map((item) => String(item.id)).join("|");
+    const previousSummary = summaries[summaries.length - 1];
+    if (previousSummary && previousSummary.endAt === startAt && previousSummary.activeIds === activeIds) {
+      previousSummary.endAt = endAt;
+    } else {
+      summaries.push({
+        startAt,
+        endAt,
+        activeIds,
+        events: prioritized.map((item) => item.detailItem || item),
+        hiddenCount: active.length - (maxLanes - 1),
+      });
+    }
+  }
+  return { eventSegments, summaries };
 }
 
 function showWeekOverlapSummary(events) {
@@ -2083,7 +2150,29 @@ function showWeekOverlapSummary(events) {
   document.body.classList.add("has-event-sheet");
 }
 
-function renderWeekSchedule() {
+function syncWeekHeaderScroll() {
+  if (!els.weekBoard || !els.weekDayHeaders) return;
+  els.weekDayHeaders.scrollLeft = Number(els.weekBoard.scrollLeft) || 0;
+}
+
+function scheduleWeekBoardPosition(dayKeyValue, releaseShiftLock = false) {
+  const finish = () => {
+    const target = els.weekBoard?.querySelector?.(`[data-day-key="${dayKeyValue}"]`)
+      || els.weekBoard?.querySelector?.(".week-column");
+    if (target && typeof target.scrollIntoView === "function") {
+      target.scrollIntoView({ block: "nearest", inline: dayKeyValue === dateKey() ? "center" : "start" });
+    }
+    syncWeekHeaderScroll();
+    if (releaseShiftLock) weekShiftInProgress = false;
+  };
+  if (typeof globalThis.requestAnimationFrame === "function") {
+    globalThis.requestAnimationFrame(finish);
+  } else {
+    finish();
+  }
+}
+
+function renderWeekSchedule(options = {}) {
   const labels = ["一", "二", "三", "四", "五", "六", "日"];
   const dayStartHour = 7;
   const dayEndHour = 22;
@@ -2093,8 +2182,11 @@ function renderWeekSchedule() {
   const end = new Date(start);
   end.setDate(start.getDate() + 6);
   els.weekRangeTitle.textContent = `${formatMonthDay(start)} - ${formatMonthDay(end)}`;
+  if (options.announce && els.weekNavigationStatus) {
+    els.weekNavigationStatus.textContent = `已切换到 ${formatMonthDay(start)}–${formatMonthDay(end)}`;
+  }
+  els.weekDayHeaders?.replaceChildren();
   els.weekBoard.replaceChildren();
-  let todayColumn = null;
 
   for (let index = 0; index < 7; index += 1) {
     const day = new Date(start);
@@ -2104,14 +2196,16 @@ function renderWeekSchedule() {
     column.className = "week-column";
     column.dataset.dayKey = key;
     column.classList.toggle("is-today", key === dateKey());
-    if (key === dateKey()) todayColumn = column;
-    const header = document.createElement("header");
+    const header = document.createElement("div");
+    header.className = "week-day-header";
+    header.dataset.dayKey = key;
+    header.classList.toggle("is-today", key === dateKey());
     const headerLabel = document.createElement("span");
     headerLabel.textContent = `周${labels[index]}`;
     const headerDate = document.createElement("strong");
     headerDate.textContent = String(day.getDate());
     header.append(headerLabel, headerDate);
-    column.append(header);
+    els.weekDayHeaders?.append(header);
 
     const list = document.createElement("div");
     list.className = "week-course-list is-timed";
@@ -2197,29 +2291,29 @@ function renderWeekSchedule() {
           group.forEach((item) => renderBlock(item));
           return;
         }
-        const prioritized = group.slice().sort((a, b) => weekEventDisplayPriority(a) - weekEventDisplayPriority(b)
-          || a.startAt - b.startAt || a.endAt - b.endAt || String(a.id).localeCompare(String(b.id)));
-        prioritized.slice(0, 2).forEach((item, laneIndex) => renderBlock(item, laneIndex, 3));
-        const hiddenCount = Math.max(1, group.length - 2);
-        const summaryStartAt = Math.min(...group.map((item) => item.startAt));
-        const summaryEndAt = Math.max(...group.map((item) => item.endAt));
-        const visibleStart = (summaryStartAt - dayWindowStart) / 60000;
-        const visibleEnd = (summaryEndAt - dayWindowStart) / 60000;
-        const summaryBlock = document.createElement("button");
-        summaryBlock.type = "button";
-        summaryBlock.className = "week-block is-overlap-summary";
-        summaryBlock.style.setProperty("--event-top", `${visibleStart / totalMinutes * 100}%`);
-        summaryBlock.style.setProperty("--event-height", `${Math.max(0.1, (visibleEnd - visibleStart) / totalMinutes * 100)}%`);
-        summaryBlock.style.setProperty("--event-left", `${2 * ((100 - 3) / 3 + 1.5)}%`);
-        summaryBlock.style.setProperty("--event-width", `${(100 - 3) / 3}%`);
-        const summaryTitle = document.createElement("strong");
-        const summaryHint = document.createElement("span");
-        summaryTitle.textContent = `+${hiddenCount} 项`;
-        summaryHint.textContent = "查看全部";
-        summaryBlock.append(summaryTitle, summaryHint);
-        summaryBlock.setAttribute("aria-label", `${group.length} 项重叠安排，查看全部`);
-        summaryBlock.addEventListener("click", () => showWeekOverlapSummary(group.map((item) => item.detailItem || item)));
-        list.append(summaryBlock);
+        const overflowDisplay = buildWeekOverflowDisplay(group, 3);
+        overflowDisplay.eventSegments.forEach((segment) => {
+          renderBlock({ ...segment.item, startAt: segment.startAt, endAt: segment.endAt }, segment.laneIndex, segment.laneCount);
+        });
+        overflowDisplay.summaries.forEach((summary) => {
+          const visibleStart = (summary.startAt - dayWindowStart) / 60000;
+          const visibleEnd = (summary.endAt - dayWindowStart) / 60000;
+          const summaryBlock = document.createElement("button");
+          summaryBlock.type = "button";
+          summaryBlock.className = "week-block is-overlap-summary";
+          summaryBlock.style.setProperty("--event-top", `${visibleStart / totalMinutes * 100}%`);
+          summaryBlock.style.setProperty("--event-height", `${Math.max(0.1, (visibleEnd - visibleStart) / totalMinutes * 100)}%`);
+          summaryBlock.style.setProperty("--event-left", `${2 * ((100 - 3) / 3 + 1.5)}%`);
+          summaryBlock.style.setProperty("--event-width", `${(100 - 3) / 3}%`);
+          const summaryTitle = document.createElement("strong");
+          const summaryHint = document.createElement("span");
+          summaryTitle.textContent = `+${summary.hiddenCount} 项`;
+          summaryHint.textContent = "查看全部";
+          summaryBlock.append(summaryTitle, summaryHint);
+          summaryBlock.setAttribute("aria-label", `${summary.events.length} 项重叠安排，查看全部`);
+          summaryBlock.addEventListener("click", () => showWeekOverlapSummary(summary.events));
+          list.append(summaryBlock);
+        });
       });
     }
 
@@ -2227,8 +2321,17 @@ function renderWeekSchedule() {
     els.weekBoard.append(column);
   }
   const mobileWeek = typeof globalThis.matchMedia === "function" && globalThis.matchMedia("(max-width: 560px)").matches;
-  if (mobileWeek && todayColumn && typeof todayColumn.scrollIntoView === "function") {
-    todayColumn.scrollIntoView({ block: "nearest", inline: "center" });
+  const shouldPosition = mobileWeek && (Boolean(options.reposition) || !weekScrollInitialized);
+  if (shouldPosition) {
+    weekScrollInitialized = true;
+    const todayKey = dateKey();
+    const targetDayKey = todayKey >= dateKey(start) && todayKey <= dateKey(end) ? todayKey : dateKey(start);
+    scheduleWeekBoardPosition(targetDayKey, Boolean(options.releaseShiftLock));
+  } else if (options.releaseShiftLock) {
+    weekShiftInProgress = false;
+    syncWeekHeaderScroll();
+  } else {
+    syncWeekHeaderScroll();
   }
 }
 
@@ -4843,7 +4946,7 @@ function appendDailyPlanPriorities(priorities) {
   els.dailyPlanContent.append(section);
 }
 
-function appendDailyPlanBlocks(blocks) {
+function appendDailyPlanBlocks(blocks, selectable = false) {
   if (blocks.length === 0) return;
   const section = document.createElement("section");
   section.className = "daily-plan-section";
@@ -4852,8 +4955,22 @@ function appendDailyPlanBlocks(blocks) {
   const list = document.createElement("div");
   list.className = "daily-plan-blocks";
   blocks.slice(0, 3).forEach((block) => {
-    const item = document.createElement("article");
+    const item = document.createElement(selectable ? "label" : "article");
     item.className = "daily-plan-block";
+    if (selectable) {
+      item.classList.add("is-selectable");
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = dailyPlanSelectedBlockIds.has(String(block.id));
+      checkbox.setAttribute("aria-label", `选择专注时段 ${String(block.title || "专注时段")}`);
+      checkbox.addEventListener("change", () => {
+        const id = String(block.id);
+        if (checkbox.checked) dailyPlanSelectedBlockIds.add(id);
+        else dailyPlanSelectedBlockIds.delete(id);
+        renderDailyPlanPreview(Number(dailyPlanPreview?.generated_at) || Date.now());
+      });
+      item.append(checkbox);
+    }
     const time = document.createElement("span");
     const title = document.createElement("strong");
     const duration = document.createElement("small");
@@ -4896,6 +5013,9 @@ function renderDailyPlanPreview(now = Date.now()) {
   const adoptedPlan = getAdoptedDailyPlan(todayKey);
   const displayPlan = preview || adoptedPlan;
   const hasValidPreview = hasDailyPlanContent(preview) && preview.dayKey === todayKey;
+  const selectedPreviewBlockCount = preview
+    ? preview.blocks.filter((block) => dailyPlanSelectedBlockIds.has(String(block.id))).length
+    : 0;
   const isBusy = dailyPlanGenerating || dailyPlanAdopting;
   els.dailyPlanCard.classList.toggle("is-loading", isBusy);
   els.dailyPlanCard.classList.toggle("is-error", Boolean(dailyPlanPreviewError || dailyPlanAdoptionError));
@@ -4905,7 +5025,7 @@ function renderDailyPlanPreview(now = Date.now()) {
   els.dailyPlanGenerateButton.textContent = displayPlan ? "重新编排" : "为我编排今天";
   if (els.dailyPlanAdoptButton) {
     els.dailyPlanAdoptButton.hidden = !hasValidPreview;
-    els.dailyPlanAdoptButton.disabled = !hasValidPreview || isBusy || Boolean(dailyPlanPreviewError);
+    els.dailyPlanAdoptButton.disabled = !hasValidPreview || selectedPreviewBlockCount === 0 || isBusy || Boolean(dailyPlanPreviewError);
     els.dailyPlanAdoptButton.setAttribute("aria-disabled", String(els.dailyPlanAdoptButton.disabled));
     els.dailyPlanAdoptButton.textContent = dailyPlanAdopting ? "保存中…" : "采用到日程";
   }
@@ -4953,7 +5073,7 @@ function renderDailyPlanPreview(now = Date.now()) {
   }
   appendDailyPlanSummary(displayPlan);
   appendDailyPlanPriorities(displayPlan.priorities.slice(0, 3));
-  appendDailyPlanBlocks(displayPlan.blocks.slice(0, 3));
+  appendDailyPlanBlocks(displayPlan.blocks.slice(0, 3), Boolean(preview));
   if (displayPlan.priorities.length > 0 && displayPlan.blocks.length === 0) {
     appendDailyPlanEmpty("暂时没有可用时段", "当前空闲段不足 20 分钟，可以先调整固定安排后重新编排。", "daily-plan-no-slots");
   }
@@ -4973,6 +5093,8 @@ async function generateDailyPlanPreview(now) {
     if (!planner || typeof planner.buildDailyPlan !== "function") throw new Error("本地编排引擎未加载");
     const input = getDailyPlanPreviewInput(now);
     dailyPlanPreview = planner.buildDailyPlan(input);
+    dailyPlanSelectedBlockIds = new Set((Array.isArray(dailyPlanPreview?.blocks) ? dailyPlanPreview.blocks : [])
+      .map((block) => String(block.id)));
     return true;
   } catch (error) {
     console.error("Daily plan preview failed:", error);
@@ -4986,7 +5108,13 @@ async function generateDailyPlanPreview(now) {
 
 async function adoptDailyPlanPreview(adoptedAt) {
   const timestamp = Number(adoptedAt);
-  const plan = createAdoptedDailyPlan(dailyPlanPreview, timestamp);
+  const selectedBlocks = Array.isArray(dailyPlanPreview?.blocks)
+    ? dailyPlanPreview.blocks.filter((block) => dailyPlanSelectedBlockIds.has(String(block.id)))
+    : [];
+  const selectedPreview = dailyPlanPreview && selectedBlocks.length > 0
+    ? { ...dailyPlanPreview, blocks: selectedBlocks }
+    : null;
+  const plan = createAdoptedDailyPlan(selectedPreview, timestamp);
   if (dailyPlanAdopting || dailyPlanGenerating || dailyPlanPreviewError || !plan) return false;
   dailyPlanAdopting = true;
   dailyPlanAdoptionError = null;
@@ -5002,6 +5130,7 @@ async function adoptDailyPlanPreview(adoptedAt) {
     const result = saveState();
     if (result === false) throw new Error("saveState returned false");
     dailyPlanPreview = null;
+    dailyPlanSelectedBlockIds = new Set();
     return true;
   } catch (error) {
     console.error("Daily plan adoption failed:", error);
@@ -5501,10 +5630,13 @@ function shiftTimelineWeek(direction) {
 }
 
 function shiftWeekSchedule(direction) {
+  if (weekShiftInProgress || ![-1, 1].includes(Number(direction))) return false;
+  weekShiftInProgress = true;
   const date = new Date(`${selectedWeekDate}T00:00:00`);
   date.setDate(date.getDate() + direction * 7);
   selectedWeekDate = dateKey(date);
-  renderWeekSchedule();
+  renderWeekSchedule({ reposition: true, announce: true, releaseShiftLock: true });
+  return true;
 }
 
 function shiftStatsWeek(direction) {
@@ -5525,17 +5657,69 @@ els.weekStrip.addEventListener("touchend", (event) => {
   shiftTimelineWeek(deltaX < 0 ? 1 : -1);
 }, { passive: true });
 
-let weekTouchStartX = null;
-els.weekBoard.addEventListener("touchstart", (event) => {
-  weekTouchStartX = event.touches[0].clientX;
-}, { passive: true });
-els.weekBoard.addEventListener("touchend", (event) => {
-  if (weekTouchStartX === null) return;
-  const deltaX = event.changedTouches[0].clientX - weekTouchStartX;
-  weekTouchStartX = null;
-  if (Math.abs(deltaX) < 48) return;
-  shiftWeekSchedule(deltaX < 0 ? 1 : -1);
-}, { passive: true });
+els.weekBoard?.addEventListener("scroll", syncWeekHeaderScroll, { passive: true });
+
+let weekHeaderGesture = null;
+function weekGestureTime(event) {
+  const timestamp = Number(event?.timeStamp);
+  return Number.isFinite(timestamp) && timestamp >= 0 ? timestamp : Date.now();
+}
+
+function startWeekHeaderGesture(event) {
+  if (event?.isPrimary === false || (event?.pointerType === "mouse" && event?.button !== 0)) return;
+  weekHeaderGesture = {
+    pointerId: event.pointerId,
+    startX: Number(event.clientX),
+    startY: Number(event.clientY),
+    startTime: weekGestureTime(event),
+    horizontalIntent: false,
+  };
+  if (typeof els.weekDayHeaders?.setPointerCapture === "function") {
+    try { els.weekDayHeaders.setPointerCapture(event.pointerId); } catch {}
+  }
+  els.weekDayHeaders?.classList.add("is-gesture-active");
+}
+
+function moveWeekHeaderGesture(event) {
+  if (!weekHeaderGesture || event.pointerId !== weekHeaderGesture.pointerId) return;
+  const deltaX = Number(event.clientX) - weekHeaderGesture.startX;
+  const deltaY = Number(event.clientY) - weekHeaderGesture.startY;
+  weekHeaderGesture.horizontalIntent = Math.abs(deltaX) >= 12 && Math.abs(deltaX) > Math.abs(deltaY) * 1.4;
+}
+
+function finishWeekHeaderGesture(event) {
+  if (!weekHeaderGesture || event.pointerId !== weekHeaderGesture.pointerId) return false;
+  const gesture = weekHeaderGesture;
+  weekHeaderGesture = null;
+  if (typeof els.weekDayHeaders?.releasePointerCapture === "function") {
+    try { els.weekDayHeaders.releasePointerCapture(event.pointerId); } catch {}
+  }
+  els.weekDayHeaders?.classList.remove("is-gesture-active");
+  const deltaX = Number(event.clientX) - gesture.startX;
+  const deltaY = Number(event.clientY) - gesture.startY;
+  const duration = weekGestureTime(event) - gesture.startTime;
+  const isHorizontalSwipe = gesture.horizontalIntent
+    && Math.abs(deltaX) >= 50
+    && Math.abs(deltaX) > Math.abs(deltaY) * 1.4
+    && duration >= 0
+    && duration <= 600;
+  if (!isHorizontalSwipe || weekShiftInProgress) return false;
+  return shiftWeekSchedule(deltaX < 0 ? 1 : -1);
+}
+
+function cancelWeekHeaderGesture(event) {
+  if (!weekHeaderGesture || (event?.pointerId !== undefined && event.pointerId !== weekHeaderGesture.pointerId)) return;
+  if (typeof els.weekDayHeaders?.releasePointerCapture === "function" && event?.pointerId !== undefined) {
+    try { els.weekDayHeaders.releasePointerCapture(event.pointerId); } catch {}
+  }
+  weekHeaderGesture = null;
+  els.weekDayHeaders?.classList.remove("is-gesture-active");
+}
+
+els.weekDayHeaders?.addEventListener("pointerdown", startWeekHeaderGesture);
+els.weekDayHeaders?.addEventListener("pointermove", moveWeekHeaderGesture);
+els.weekDayHeaders?.addEventListener("pointerup", finishWeekHeaderGesture);
+els.weekDayHeaders?.addEventListener("pointercancel", cancelWeekHeaderGesture);
 
 let statsTouchStartX = null;
 els.weekChart.addEventListener("touchstart", (event) => {

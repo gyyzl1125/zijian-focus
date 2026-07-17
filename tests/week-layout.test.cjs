@@ -12,18 +12,21 @@ const indexSource = fs.readFileSync("index.html", "utf8");
 const stylesSource = fs.readFileSync("styles.css", "utf8");
 const layoutStart = appSource.indexOf("function layoutOverlappingEvents");
 const layoutEnd = appSource.indexOf("function weekEventDisplayPriority", layoutStart);
+const overflowEnd = appSource.indexOf("function showWeekOverlapSummary", layoutEnd);
 const helperStart = appSource.indexOf("function dailyPlanDayKey");
 const helperEnd = appSource.indexOf("function createAdoptedDailyPlan", helperStart);
 const renderStart = appSource.indexOf("function renderTimeline");
 const renderEnd = appSource.indexOf("function renderDdl", renderStart);
 assert.ok(layoutStart >= 0 && layoutEnd > layoutStart, "week lane helper should exist");
+assert.ok(overflowEnd > layoutEnd, "local overflow helper should exist");
 assert.ok(helperStart >= 0 && helperEnd > helperStart, "adopted plan helpers should exist");
 assert.ok(renderStart >= 0 && renderEnd > renderStart, "week renderer should exist");
 
-const layoutContext = { Number, String, Object, Array, Math, Set, Map };
+const layoutContext = { Number, String, Object, Array, Math, Set, Map, globalThis: { DailyPlanner } };
 vm.createContext(layoutContext);
-vm.runInContext(`${appSource.slice(layoutStart, layoutEnd)}; this.layout = layoutOverlappingEvents;`, layoutContext);
+vm.runInContext(`${appSource.slice(layoutStart, overflowEnd)}; this.layout = layoutOverlappingEvents; this.overflow = buildWeekOverflowDisplay;`, layoutContext);
 const layout = layoutContext.layout;
+const overflow = layoutContext.overflow;
 
 function event(id, startAt, endAt, type = "task", title = id, extra = {}) {
   return { id, startAt, endAt, type, title, ...extra };
@@ -84,6 +87,40 @@ test("fixed input produces a byte-for-byte stable result", () => {
   assert.equal(JSON.stringify(layout(input)), JSON.stringify(layout(structuredClone(input))));
 });
 
+test("local lane counts recover after a four-way overlap ends", () => {
+  const input = [
+    event("long", 0, 120, "course"),
+    event("b", 30, 60, "task"),
+    event("c", 30, 60, "planned-focus"),
+    event("d", 30, 60, "task"),
+    event("later", 60, 90, "task"),
+  ];
+  const result = plain(layout(input));
+  assert.equal(result.find((item) => item.id === "long").laneCount, 4);
+  assert.equal(result.find((item) => item.id === "later").laneCount, 2);
+});
+
+test("overflow summaries cover only the actual over-capacity time slice", () => {
+  const laidOut = layout([
+    event("long", 0, 120, "course"),
+    event("b", 30, 60, "task"),
+    event("c", 30, 60, "planned-focus"),
+    event("d", 30, 60, "task"),
+    event("later", 60, 90, "task"),
+  ]);
+  const display = plain(overflow(laidOut, 3));
+  assert.equal(display.summaries.length, 1);
+  assert.equal(display.summaries[0].startAt, 30);
+  assert.equal(display.summaries[0].endAt, 60);
+  assert.equal(display.summaries[0].events.length, 4);
+  const later = display.eventSegments.find((segment) => segment.id === "later");
+  assert.equal(later.laneCount, 2);
+  const longAfterOverlap = display.eventSegments.find((segment) => segment.id === "long" && segment.startAt === 90);
+  assert.equal(longAfterOverlap.endAt, 120);
+  assert.equal(longAfterOverlap.laneCount, 1);
+  assert.equal(longAfterOverlap.laneIndex, 0);
+});
+
 const MONDAY = "2026-07-20";
 const TODAY = "2026-07-22";
 
@@ -133,6 +170,9 @@ function createHarness({ state = baseState(), selectedWeekDate = TODAY } = {}) {
   articlePrototype.scrollIntoView = function scrollIntoView(options) {
     scrollCalls += 1;
     this.dataset.scrollInline = String(options?.inline || "");
+    const board = this.parentElement;
+    const index = [...board.children].indexOf(this);
+    board.scrollLeft = Math.max(0, index) * 154;
   };
   const context = {
     document,
@@ -142,6 +182,8 @@ function createHarness({ state = baseState(), selectedWeekDate = TODAY } = {}) {
     globalThis: null,
     selectedTimelineDate: MONDAY,
     selectedWeekDate,
+    weekShiftInProgress: false,
+    weekScrollInitialized: false,
     eventDetailTaskId: null,
     dailyPlanPreview: null,
     Number, String, Object, Array, Set, Map, Math, Date,
@@ -151,7 +193,9 @@ function createHarness({ state = baseState(), selectedWeekDate = TODAY } = {}) {
       timelineStats: document.querySelector("#timelineStats"),
       timelineList: document.querySelector("#timelineList"),
       weekBoard: document.querySelector("#weekBoard"),
+      weekDayHeaders: document.querySelector("#weekDayHeaders"),
       weekRangeTitle: document.querySelector("#weekRangeTitle"),
+      weekNavigationStatus: document.querySelector("#weekNavigationStatus"),
       eventSheet: document.querySelector("#eventSheet"),
       eventSheetType: document.querySelector("#eventSheetType"),
       eventSheetTitle: document.querySelector("#eventSheetTitle"),
@@ -195,7 +239,7 @@ function createHarness({ state = baseState(), selectedWeekDate = TODAY } = {}) {
   vm.runInContext(`
     ${appSource.slice(helperStart, helperEnd)}
     ${appSource.slice(renderStart, renderEnd)}
-    this.api = { renderWeekSchedule, showEventDetail, showWeekOverlapSummary };
+    this.api = { renderWeekSchedule, showEventDetail, showWeekOverlapSummary, syncWeekHeaderScroll };
   `, context);
   return {
     document,
@@ -300,6 +344,40 @@ test("rendering defaults the scroll target to today's column", () => {
   const today = harness.els.weekBoard.querySelector(`[data-day-key="${TODAY}"]`);
   assert.equal(harness.scrollCalls, 1);
   assert.equal(today.dataset.scrollInline, "center");
+  assert.equal(harness.els.weekDayHeaders.scrollLeft, harness.els.weekBoard.scrollLeft);
+  harness.restore();
+});
+
+test("content scrolling keeps the date headers in the same horizontal coordinate system", () => {
+  const harness = createHarness();
+  harness.api.renderWeekSchedule();
+  harness.els.weekBoard.scrollLeft = 462;
+  harness.api.syncWeekHeaderScroll();
+  assert.equal(harness.els.weekDayHeaders.scrollLeft, 462);
+  harness.restore();
+});
+
+test("ordinary rerender preserves the user's current week scroll position", () => {
+  const harness = createHarness();
+  harness.api.renderWeekSchedule();
+  assert.equal(harness.scrollCalls, 1);
+  harness.els.weekBoard.scrollLeft = 308;
+  harness.api.syncWeekHeaderScroll();
+  harness.api.renderWeekSchedule();
+  assert.equal(harness.scrollCalls, 1);
+  assert.equal(harness.els.weekBoard.scrollLeft, 308);
+  assert.equal(harness.els.weekDayHeaders.scrollLeft, 308);
+  harness.restore();
+});
+
+test("explicit navigation to a week without today positions the Monday column", () => {
+  const nextMonday = "2026-07-27";
+  const harness = createHarness({ selectedWeekDate: nextMonday });
+  harness.api.renderWeekSchedule({ reposition: true, announce: true });
+  const monday = harness.els.weekBoard.querySelector(`[data-day-key="${nextMonday}"]`);
+  assert.equal(monday.dataset.scrollInline, "start");
+  assert.equal(harness.els.weekDayHeaders.scrollLeft, harness.els.weekBoard.scrollLeft);
+  assert.match(harness.els.weekNavigationStatus.textContent, /已切换到/);
   harness.restore();
 });
 
@@ -331,7 +409,9 @@ test("week rendering is read-only for plans and focus statistics", () => {
 });
 
 test("mobile week CSS scrolls horizontally with readable day widths", () => {
-  assert.match(stylesSource, /@media \(max-width: 560px\)[\s\S]*?\.week-board \{[\s\S]*?grid-template-columns: repeat\(7, minmax\(148px, 148px\)\)/);
+  assert.match(stylesSource, /--week-mobile-column-width: 148px/);
+  assert.match(stylesSource, /\.week-day-headers \{[\s\S]*?grid-template-columns: repeat\(7, minmax\(var\(--week-mobile-column-width\), var\(--week-mobile-column-width\)\)\)/);
+  assert.match(stylesSource, /@media \(max-width: 560px\)[\s\S]*?\.week-board \{[\s\S]*?grid-template-columns: repeat\(7, minmax\(var\(--week-mobile-column-width\), var\(--week-mobile-column-width\)\)\)/);
   assert.match(stylesSource, /\.week-board \{[\s\S]*?overflow-x: auto;/);
   assert.match(stylesSource, /scroll-snap-type: x proximity/);
   assert.match(stylesSource, /\.week-column \{[\s\S]*?scroll-snap-align: start;/);

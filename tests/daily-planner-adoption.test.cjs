@@ -79,6 +79,7 @@ function createHarness({ state = baseState(), saveMode = "success", planner = Da
     let dailyPlanAdopting = false;
     let dailyPlanAdoptionError = null;
     let dailyPlanPreviewNeedsRegeneration = false;
+    let dailyPlanSelectedBlockIds = new Set();
     ${persistenceSource}
     this.adoptionApi = {
       render: renderDailyPlanPreview,
@@ -86,6 +87,7 @@ function createHarness({ state = baseState(), saveMode = "success", planner = Da
       adopt: adoptDailyPlanPreview,
       normalize: normalizeDailyPlanForDisplay,
       get preview() { return dailyPlanPreview; },
+      get selectedBlockIds() { return [...dailyPlanSelectedBlockIds]; },
       get adopting() { return dailyPlanAdopting; },
       get adoptionError() { return dailyPlanAdoptionError; }
     };
@@ -140,6 +142,64 @@ test("adoption saves one complete deep-cloned plan and calls saveState once", as
   assert.equal(saved.priorities[0].title, "任务 A");
   assert.equal(harness.els.dailyPlanStatus.textContent, "已采用");
   assert.match(harness.els.dailyPlanNextStage.textContent, /今日编排已保存/);
+});
+
+test("a new balanced preview selects every suggested block by default", async () => {
+  const state = baseState({
+    tasks: [
+      makeTask("a", "任务 A", localTime(2026, 7, 16, 18, 0)),
+      makeTask("b", "任务 B", localTime(2026, 7, 16, 19, 0)),
+      makeTask("c", "任务 C", localTime(2026, 7, 16, 20, 0)),
+    ],
+  });
+  const harness = createHarness({ state });
+  await harness.api.generate(NOW);
+  const checkboxes = [...harness.els.dailyPlanContent.querySelectorAll('.daily-plan-block input[type="checkbox"]')];
+  assert.equal(checkboxes.length, harness.api.preview.blocks.length);
+  assert.ok(checkboxes.length > 0);
+  assert.ok(checkboxes.every((checkbox) => checkbox.checked));
+  assert.deepEqual(new Set(harness.api.selectedBlockIds), new Set(harness.api.preview.blocks.map((block) => block.id)));
+  assert.equal(harness.els.dailyPlanAdoptButton.disabled, false);
+  assert.equal(harness.els.dailyPlanContent.querySelector(".daily-plan-priority input"), null);
+});
+
+test("balanced adoption persists only checked blocks and never persists selection state", async () => {
+  const state = baseState({
+    tasks: [
+      makeTask("a", "任务 A", localTime(2026, 7, 16, 18, 0)),
+      makeTask("b", "任务 B", localTime(2026, 7, 16, 19, 0)),
+      makeTask("c", "任务 C", localTime(2026, 7, 16, 20, 0)),
+    ],
+  });
+  const harness = createHarness({ state });
+  await harness.api.generate(NOW);
+  const previewIds = harness.api.preview.blocks.map((block) => block.id);
+  const checkboxes = [...harness.els.dailyPlanContent.querySelectorAll('.daily-plan-block input[type="checkbox"]')];
+  assert.ok(checkboxes.length >= 2);
+  checkboxes[1].checked = false;
+  checkboxes[1].dispatchEvent(new harness.document.defaultView.Event("change"));
+  assert.equal(await harness.api.adopt(NOW + 1000), true);
+  const saved = state.dailyPlans[DAY_KEY];
+  assert.deepEqual(saved.blocks.map((block) => block.id), previewIds.filter((_, index) => index !== 1));
+  assert.equal(saved.priorities.length, 3);
+  assert.doesNotMatch(JSON.stringify(saved), /selected|checked|loading/);
+  assert.equal(Object.hasOwn(state, "dailyPlanSelectedBlockIds"), false);
+});
+
+test("balanced adoption is disabled and does not save when every block is unchecked", async () => {
+  const state = baseState({ tasks: [makeTask("a", "任务 A", localTime(2026, 7, 16, 18, 0))] });
+  const harness = createHarness({ state });
+  await harness.api.generate(NOW);
+  const checkboxes = [...harness.els.dailyPlanContent.querySelectorAll('.daily-plan-block input[type="checkbox"]')];
+  assert.ok(checkboxes.length > 0);
+  checkboxes.forEach((checkbox) => {
+    checkbox.checked = false;
+    checkbox.dispatchEvent(new harness.document.defaultView.Event("change"));
+  });
+  assert.equal(harness.els.dailyPlanAdoptButton.disabled, true);
+  assert.equal(await harness.api.adopt(NOW + 1000), false);
+  assert.equal(harness.saveCalls, 0);
+  assert.deepEqual(state.dailyPlans, {});
 });
 
 test("adoption changes no task, course, focus history, statistics or flame data", async () => {
