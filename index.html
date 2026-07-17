@@ -423,13 +423,56 @@
             </div>
             <button class="small-add-button" id="habitAddButton" type="button" aria-label="新增习惯">+</button>
           </div>
+          <section class="habit-stats-card habit-today-card" aria-labelledby="habitTodayHeading">
+            <div class="habit-stats-heading">
+              <div><span class="habit-section-label">Today</span><h3 id="habitTodayHeading">今日完成率</h3></div>
+              <label class="habit-stats-filter">统计范围
+                <select id="habitStatsFilter" aria-label="筛选习惯统计">
+                  <option value="all">全部习惯</option>
+                </select>
+              </label>
+            </div>
+            <div class="habit-rate-row">
+              <strong id="habitTodayRate">—</strong>
+              <span id="habitTodayDetail">今天没有应打卡习惯</span>
+            </div>
+            <progress id="habitTodayProgress" max="100" value="0" aria-label="今日习惯完成率"></progress>
+          </section>
           <div class="habit-week-strip" id="habitWeekStrip" aria-label="选择打卡日期"></div>
-          <div class="habit-day-summary">
-            <div><strong id="habitSelectedDate">今天</strong><span id="habitCompletionText">0 / 0 完成</span></div>
-            <progress id="habitCompletionProgress" max="100" value="0" aria-label="当日习惯完成率"></progress>
-          </div>
-          <div class="habit-list" id="habitList"></div>
-          <p class="habit-empty" id="habitEmpty" hidden>这一天没有安排习惯</p>
+          <section class="habit-stats-card habit-week-card" aria-labelledby="habitWeekHeading">
+            <div class="habit-stats-heading">
+              <div><span class="habit-section-label">This week</span><h3 id="habitWeekHeading">本周完成概览</h3></div>
+              <strong id="habitWeekRate">—</strong>
+            </div>
+            <p id="habitWeekDetail">本周没有应打卡习惯</p>
+            <div class="habit-week-overview" id="habitWeekOverview" aria-label="本周每日习惯完成率"></div>
+          </section>
+          <section class="habit-streak-grid" aria-label="连续打卡统计">
+            <article><span>当前连续天数</span><strong id="habitCurrentStreak">0</strong><small>个应打卡日</small></article>
+            <article><span>最长连续天数</span><strong id="habitLongestStreak">0</strong><small>个应打卡日</small></article>
+          </section>
+          <section class="habit-stats-card habit-trend-card" aria-labelledby="habitTrendHeading">
+            <div class="habit-stats-heading"><div><span class="habit-section-label">14 days</span><h3 id="habitTrendHeading">完成率趋势</h3></div></div>
+            <div class="habit-trend-chart" id="habitTrendChart" aria-label="最近十四天习惯完成率趋势"></div>
+          </section>
+          <section class="habit-stats-card habit-heatmap-card" aria-labelledby="habitHeatmapHeading">
+            <div class="habit-stats-heading">
+              <div><span class="habit-section-label">90 days</span><h3 id="habitHeatmapHeading">习惯完成热力图</h3></div>
+              <span class="habit-heatmap-range" id="habitHeatmapRange"></span>
+            </div>
+            <div class="habit-heatmap-scroller" id="habitHeatmapScroller">
+              <div class="habit-heatmap" id="habitHeatmap" aria-label="最近九十天习惯完成率"></div>
+            </div>
+            <div class="habit-heatmap-legend" aria-label="完成率图例"><span>低</span><i class="level-0"></i><i class="level-1"></i><i class="level-2"></i><i class="level-3"></i><i class="level-4"></i><span>高</span><i class="is-empty"></i><span>无安排</span></div>
+          </section>
+          <section class="habit-checkin-section" aria-labelledby="habitSelectedDate">
+            <div class="habit-day-summary">
+              <div><strong id="habitSelectedDate">今天</strong><span id="habitCompletionText">0 / 0 完成</span></div>
+              <progress id="habitCompletionProgress" max="100" value="0" aria-label="所选日期习惯完成率"></progress>
+            </div>
+            <div class="habit-list" id="habitList"></div>
+            <p class="habit-empty" id="habitEmpty" hidden>这一天没有安排习惯</p>
+          </section>
           <span class="visually-hidden" id="habitStatus" role="status" aria-live="polite"></span>
         </section>
       </section>

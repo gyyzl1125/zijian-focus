@@ -135,6 +135,7 @@ let deadlineSprintAdoptionError = null;
 let deadlineSprintAdoptionNotice = null;
 let deadlineSprintConflictIds = new Set();
 let selectedHabitDate = dateKey();
+let selectedHabitStatsFilter = "all";
 let editingHabitId = null;
 
 const els = {
@@ -180,7 +181,20 @@ const els = {
   flameSpentWeek: document.querySelector("#flameSpentWeek"),
   flameBalanceText: document.querySelector("#flameBalanceText"),
   habitAddButton: document.querySelector("#habitAddButton"),
+  habitStatsFilter: document.querySelector("#habitStatsFilter"),
+  habitTodayRate: document.querySelector("#habitTodayRate"),
+  habitTodayDetail: document.querySelector("#habitTodayDetail"),
+  habitTodayProgress: document.querySelector("#habitTodayProgress"),
   habitWeekStrip: document.querySelector("#habitWeekStrip"),
+  habitWeekRate: document.querySelector("#habitWeekRate"),
+  habitWeekDetail: document.querySelector("#habitWeekDetail"),
+  habitWeekOverview: document.querySelector("#habitWeekOverview"),
+  habitCurrentStreak: document.querySelector("#habitCurrentStreak"),
+  habitLongestStreak: document.querySelector("#habitLongestStreak"),
+  habitTrendChart: document.querySelector("#habitTrendChart"),
+  habitHeatmapScroller: document.querySelector("#habitHeatmapScroller"),
+  habitHeatmap: document.querySelector("#habitHeatmap"),
+  habitHeatmapRange: document.querySelector("#habitHeatmapRange"),
   habitSelectedDate: document.querySelector("#habitSelectedDate"),
   habitCompletionText: document.querySelector("#habitCompletionText"),
   habitCompletionProgress: document.querySelector("#habitCompletionProgress"),
@@ -3424,11 +3438,146 @@ function renderHabitValueControl(habit, entry) {
   return wrapper;
 }
 
+function habitRateLabel(rate) {
+  return rate === null ? "—" : `${Math.round(rate * 100)}%`;
+}
+
+function habitHeatLevel(rate) {
+  if (rate === null) return null;
+  if (rate <= 0) return 0;
+  if (rate <= 0.25) return 1;
+  if (rate <= 0.5) return 2;
+  if (rate <= 0.75) return 3;
+  return 4;
+}
+
+function renderHabitStatsFilter() {
+  if (!els.habitStatsFilter) return;
+  const activeHabits = habitApi().normalizeHabits(state.habits, Date.now()).filter((habit) => habit.archivedAt === null);
+  if (selectedHabitStatsFilter !== "all" && !activeHabits.some((habit) => habit.id === selectedHabitStatsFilter)) {
+    selectedHabitStatsFilter = "all";
+  }
+  const previous = selectedHabitStatsFilter;
+  els.habitStatsFilter.replaceChildren();
+  const all = document.createElement("option");
+  all.value = "all";
+  all.textContent = "全部习惯";
+  els.habitStatsFilter.append(all);
+  activeHabits.forEach((habit) => {
+    const option = document.createElement("option");
+    option.value = habit.id;
+    option.textContent = habit.title;
+    els.habitStatsFilter.append(option);
+  });
+  els.habitStatsFilter.value = previous;
+}
+
+function renderHabitWeekOverview(entries, todayKey) {
+  const weekStart = getWeekStart(new Date(`${todayKey}T00:00:00`));
+  const startKey = dateKey(weekStart);
+  const endKey = habitApi().addDaysToKey(startKey, 6);
+  const stats = habitApi().getHabitStatsRange(state.habits, entries, startKey, endKey, selectedHabitStatsFilter);
+  const scheduled = stats.reduce((total, day) => total + day.scheduled, 0);
+  const completed = stats.reduce((total, day) => total + day.completed, 0);
+  const rate = scheduled ? completed / scheduled : null;
+  els.habitWeekRate.textContent = habitRateLabel(rate);
+  els.habitWeekDetail.textContent = scheduled ? `${completed} / ${scheduled} 次达标` : "本周没有应打卡习惯";
+  els.habitWeekOverview.replaceChildren();
+  const labels = ["一", "二", "三", "四", "五", "六", "日"];
+  stats.forEach((day, index) => {
+    const item = document.createElement("div");
+    item.className = "habit-week-overview-day";
+    item.classList.toggle("is-empty", day.rate === null);
+    item.classList.toggle("is-today", day.dayKey === todayKey);
+    const bar = document.createElement("i");
+    bar.style.setProperty("--habit-rate", String(day.rate ?? 0));
+    const label = document.createElement("span");
+    label.textContent = `周${labels[index]}`;
+    const value = document.createElement("strong");
+    value.textContent = habitRateLabel(day.rate);
+    item.setAttribute("aria-label", `${day.dayKey}：${day.rate === null ? "无应打卡习惯" : `${day.completed}/${day.scheduled} 达标`}`);
+    item.append(bar, label, value);
+    els.habitWeekOverview.append(item);
+  });
+}
+
+function renderHabitTrend(entries, todayKey) {
+  const startKey = habitApi().addDaysToKey(todayKey, -13);
+  const stats = habitApi().getHabitStatsRange(state.habits, entries, startKey, todayKey, selectedHabitStatsFilter);
+  els.habitTrendChart.replaceChildren();
+  stats.forEach((day) => {
+    const item = document.createElement("div");
+    item.className = "habit-trend-day";
+    item.classList.toggle("is-empty", day.rate === null);
+    const bar = document.createElement("i");
+    bar.style.setProperty("--habit-rate", String(day.rate ?? 0));
+    const date = new Date(`${day.dayKey}T00:00:00`);
+    const label = document.createElement("span");
+    label.textContent = String(date.getDate());
+    item.setAttribute("aria-label", `${date.getMonth() + 1}月${date.getDate()}日：${day.rate === null ? "无安排" : habitRateLabel(day.rate)}`);
+    item.append(bar, label);
+    els.habitTrendChart.append(item);
+  });
+}
+
+function renderHabitCompletionHeatmap(entries, todayKey) {
+  const startKey = habitApi().addDaysToKey(todayKey, -89);
+  const stats = habitApi().getHabitStatsRange(state.habits, entries, startKey, todayKey, selectedHabitStatsFilter);
+  const startDate = new Date(`${startKey}T00:00:00`);
+  const leadingDays = (startDate.getDay() + 6) % 7;
+  els.habitHeatmap.replaceChildren();
+  for (let index = 0; index < leadingDays; index += 1) {
+    const spacer = document.createElement("i");
+    spacer.className = "habit-heatmap-spacer is-leading";
+    spacer.setAttribute("aria-hidden", "true");
+    els.habitHeatmap.append(spacer);
+  }
+  stats.forEach((day) => {
+    const cell = document.createElement("i");
+    const level = habitHeatLevel(day.rate);
+    cell.className = `habit-heatmap-cell ${level === null ? "is-empty" : `level-${level}`}`;
+    cell.dataset.dayKey = day.dayKey;
+    const date = new Date(`${day.dayKey}T00:00:00`);
+    cell.setAttribute("aria-label", `${date.getMonth() + 1}月${date.getDate()}日：${day.rate === null ? "无应打卡习惯" : `${habitRateLabel(day.rate)}，${day.completed}/${day.scheduled} 达标`}`);
+    els.habitHeatmap.append(cell);
+  });
+  for (let index = 0; index < 42; index += 1) {
+    const spacer = document.createElement("i");
+    spacer.className = "habit-heatmap-spacer is-trailing";
+    spacer.setAttribute("aria-hidden", "true");
+    els.habitHeatmap.append(spacer);
+  }
+  els.habitHeatmapRange.textContent = `${startDate.getMonth() + 1}月${startDate.getDate()}日–今天`;
+}
+
+function renderHabitStats(entries) {
+  if (!els.habitTodayRate || !els.habitWeekOverview || !els.habitHeatmap) return;
+  renderHabitStatsFilter();
+  const todayKey = dateKey();
+  const today = habitApi().getHabitDayStats(state.habits, entries, todayKey, selectedHabitStatsFilter);
+  els.habitTodayRate.textContent = habitRateLabel(today.rate);
+  els.habitTodayDetail.textContent = today.scheduled ? `${today.completed} / ${today.scheduled} 个习惯达标` : "今天没有应打卡习惯";
+  els.habitTodayProgress.value = Math.round((today.rate ?? 0) * 100);
+  els.habitTodayProgress.hidden = today.rate === null;
+  renderHabitWeekOverview(entries, todayKey);
+  const streak = habitApi().getHabitStreakStats(state.habits, entries, todayKey, selectedHabitStatsFilter);
+  els.habitCurrentStreak.textContent = String(streak.current);
+  els.habitLongestStreak.textContent = String(streak.longest);
+  renderHabitTrend(entries, todayKey);
+  renderHabitCompletionHeatmap(entries, todayKey);
+}
+
+function selectHabitStatsFilter(value) {
+  selectedHabitStatsFilter = value === "all" ? "all" : String(value || "");
+  renderHabits();
+}
+
 function renderHabits() {
   if (!els.habitList || !habitApi()) return;
   renderHabitWeekStrip();
   const habits = habitApi().getHabitsForDay(state.habits, selectedHabitDate);
   const entries = habitApi().normalizeHabitEntries(state.habitEntries, Date.now());
+  renderHabitStats(entries);
   const summary = habitApi().getHabitCompletionSummary(state.habits, entries, selectedHabitDate);
   const selected = new Date(`${selectedHabitDate}T00:00:00`);
   els.habitSelectedDate.textContent = `${selected.getMonth() + 1}月${selected.getDate()}日`;
@@ -6057,6 +6206,7 @@ els.timelineTaskSelect?.addEventListener("change", () => {
 els.timelineStartButton?.addEventListener("click", () => startSelectedTaskActivity(Date.now()));
 els.timelineEndButton?.addEventListener("click", () => endCurrentTaskActivity(Date.now()));
 els.habitAddButton?.addEventListener("click", () => openHabitEditor());
+els.habitStatsFilter?.addEventListener("change", () => selectHabitStatsFilter(els.habitStatsFilter.value));
 els.habitEditorBackdrop?.addEventListener("click", closeHabitEditor);
 els.habitEditorClose?.addEventListener("click", closeHabitEditor);
 els.habitMetricType?.addEventListener("change", updateHabitMetricFields);

@@ -48,13 +48,27 @@ function createHarness({ state = baseState(), saveFails = false, confirmResult =
   const context = {
     document, state, Habits,
     selectedHabitDate: MONDAY,
+    selectedHabitStatsFilter: "all",
     editingHabitId: null,
     Number, String, Object, Array, Set, Map, Math, Date,
     structuredClone,
     crypto: { randomUUID() { idCounter += 1; return `created-${idCounter}`; } },
     els: {
       habitAddButton: document.querySelector("#habitAddButton"),
+      habitStatsFilter: document.querySelector("#habitStatsFilter"),
+      habitTodayRate: document.querySelector("#habitTodayRate"),
+      habitTodayDetail: document.querySelector("#habitTodayDetail"),
+      habitTodayProgress: document.querySelector("#habitTodayProgress"),
       habitWeekStrip: document.querySelector("#habitWeekStrip"),
+      habitWeekRate: document.querySelector("#habitWeekRate"),
+      habitWeekDetail: document.querySelector("#habitWeekDetail"),
+      habitWeekOverview: document.querySelector("#habitWeekOverview"),
+      habitCurrentStreak: document.querySelector("#habitCurrentStreak"),
+      habitLongestStreak: document.querySelector("#habitLongestStreak"),
+      habitTrendChart: document.querySelector("#habitTrendChart"),
+      habitHeatmapScroller: document.querySelector("#habitHeatmapScroller"),
+      habitHeatmap: document.querySelector("#habitHeatmap"),
+      habitHeatmapRange: document.querySelector("#habitHeatmapRange"),
       habitSelectedDate: document.querySelector("#habitSelectedDate"),
       habitCompletionText: document.querySelector("#habitCompletionText"),
       habitCompletionProgress: document.querySelector("#habitCompletionProgress"),
@@ -105,6 +119,7 @@ function createHarness({ state = baseState(), saveFails = false, confirmResult =
     this.api = {
       renderHabits, openHabitEditor, closeHabitEditor, saveHabitFromForm,
       archiveEditingHabit, setHabitValue, updateHabitMetricFields,
+      selectHabitStatsFilter,
       get selectedDate() { return selectedHabitDate; },
       get editingId() { return editingHabitId; }
     };
@@ -259,6 +274,6 @@ test("save failures roll back habit collections and keep the editor available", 
 
 test("habit mobile layout keeps the week strip readable and list vertically scrollable", () => {
   assert.match(stylesSource, /\.habit-week-strip \{[\s\S]*?repeat\(7, minmax\(0, 1fr\)\)/);
-  assert.match(stylesSource, /@media \(max-width: 560px\)[\s\S]*?\.habit-panel \{[\s\S]*?overflow: hidden;/);
-  assert.match(stylesSource, /\.habit-list \{[\s\S]*?overflow-y: auto;/);
+  assert.match(stylesSource, /@media \(max-width: 560px\)[\s\S]*?\.habit-panel \{[\s\S]*?overflow: hidden auto;/);
+  assert.match(stylesSource, /\.habit-list \{[\s\S]*?overflow: visible;/);
 });

@@ -233,6 +233,80 @@
     };
   }
 
+  function getHabitDayStats(habits, entries, dayKey, habitId = null) {
+    const selectedId = habitId === null || habitId === undefined || habitId === "all" ? null : cleanId(habitId);
+    const scheduled = getHabitsForDay(habits, dayKey)
+      .filter((habit) => !selectedId || habit.id === selectedId);
+    const normalizedEntries = normalizeHabitEntries(entries);
+    const completed = scheduled.filter((habit) => {
+      const entry = normalizedEntries.find((item) => item.habitId === habit.id && item.dayKey === dayKey);
+      return isHabitComplete(habit, entry);
+    }).length;
+    return {
+      dayKey: normalizeDayKey(dayKey),
+      scheduled: scheduled.length,
+      completed,
+      rate: scheduled.length ? completed / scheduled.length : null,
+    };
+  }
+
+  function addDaysToKey(dayKey, amount) {
+    const normalized = normalizeDayKey(dayKey);
+    const days = Number(amount);
+    if (!normalized || !Number.isInteger(days)) return "";
+    const date = new Date(`${normalized}T12:00:00`);
+    date.setDate(date.getDate() + days);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  }
+
+  function getHabitStatsRange(habits, entries, startDayKey, endDayKey, habitId = null) {
+    const start = normalizeDayKey(startDayKey);
+    const end = normalizeDayKey(endDayKey);
+    if (!start || !end || start > end) return [];
+    const result = [];
+    let cursor = start;
+    let guard = 0;
+    while (cursor && cursor <= end && guard < 5000) {
+      result.push(getHabitDayStats(habits, entries, cursor, habitId));
+      cursor = addDaysToKey(cursor, 1);
+      guard += 1;
+    }
+    return result;
+  }
+
+  function getHabitStreakStats(habits, entries, throughDayKey, habitId = null) {
+    const through = normalizeDayKey(throughDayKey);
+    const normalizedHabits = normalizeHabits(habits);
+    const selectedId = habitId === null || habitId === undefined || habitId === "all" ? null : cleanId(habitId);
+    const relevant = normalizedHabits.filter((habit) => !selectedId || habit.id === selectedId);
+    if (!through || relevant.length === 0) return { current: 0, longest: 0 };
+    const earliest = relevant.reduce((minimum, habit) => {
+      const date = new Date(habit.createdAt);
+      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+      return !minimum || key < minimum ? key : minimum;
+    }, "");
+    const stats = getHabitStatsRange(normalizedHabits, entries, earliest, through, selectedId);
+    let longest = 0;
+    let running = 0;
+    stats.forEach((day) => {
+      if (day.scheduled === 0) return;
+      if (day.rate === 1) {
+        running += 1;
+        longest = Math.max(longest, running);
+      } else {
+        running = 0;
+      }
+    });
+    let current = 0;
+    for (let index = stats.length - 1; index >= 0; index -= 1) {
+      const day = stats[index];
+      if (day.scheduled === 0) continue;
+      if (day.rate !== 1) break;
+      current += 1;
+    }
+    return { current, longest };
+  }
+
   return Object.freeze({
     normalizeHabit,
     normalizeHabits,
@@ -249,5 +323,9 @@
     isHabitComplete,
     getHabitsForDay,
     getHabitCompletionSummary,
+    getHabitDayStats,
+    getHabitStatsRange,
+    getHabitStreakStats,
+    addDaysToKey,
   });
 });

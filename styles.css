@@ -3375,15 +3375,262 @@ button.timeline-task-card {
 
 .habit-panel {
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  align-content: start;
   gap: 12px;
   min-height: 680px;
+  overflow: hidden auto;
+}
+
+.habit-stats-card,
+.habit-streak-grid article,
+.habit-checkin-section {
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--line), transparent 18%);
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--surface), var(--bg) 7%);
+}
+
+.habit-stats-card {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+}
+
+.habit-stats-heading,
+.habit-rate-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.habit-stats-heading h3 {
+  margin: 2px 0 0;
+  font-size: 1rem;
+}
+
+.habit-section-label {
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.habit-stats-filter {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 850;
+}
+
+.habit-stats-filter select {
+  max-width: 150px;
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0 30px 0 10px;
+  color: var(--ink);
+  background: var(--surface);
+  font: inherit;
+}
+
+.habit-rate-row strong,
+.habit-week-card .habit-stats-heading > strong {
+  color: var(--primary);
+  font-size: clamp(1.65rem, 6vw, 2.3rem);
+  line-height: 1;
+}
+
+.habit-rate-row span,
+.habit-week-card > p,
+.habit-heatmap-range {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.habit-today-card progress {
+  width: 100%;
+  accent-color: var(--primary);
 }
 
 .habit-week-strip {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 7px;
+}
+
+.habit-week-overview {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 7px;
+  min-height: 82px;
+}
+
+.habit-week-overview-day {
+  display: grid;
+  grid-template-rows: minmax(30px, 1fr) auto auto;
+  justify-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 850;
+}
+
+.habit-week-overview-day i {
+  align-self: end;
+  width: min(18px, 70%);
+  height: max(4px, calc(var(--habit-rate) * 38px));
+  border-radius: 999px;
+  background: var(--primary);
+}
+
+.habit-week-overview-day.is-empty i {
+  height: 4px;
+  background: var(--line);
+}
+
+.habit-week-overview-day.is-today span {
+  color: var(--primary);
+}
+
+.habit-week-overview-day strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 0.68rem;
+  text-overflow: ellipsis;
+}
+
+.habit-streak-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.habit-streak-grid article {
+  display: grid;
+  gap: 4px;
+  padding: 16px;
+}
+
+.habit-streak-grid span,
+.habit-streak-grid small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.habit-streak-grid strong {
+  color: var(--ink);
+  font-size: 1.75rem;
+}
+
+.habit-trend-chart {
+  display: grid;
+  grid-template-columns: repeat(14, minmax(8px, 1fr));
+  align-items: end;
+  gap: 5px;
+  min-height: 100px;
+}
+
+.habit-trend-day {
+  display: grid;
+  grid-template-rows: 76px auto;
+  align-items: end;
+  justify-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.habit-trend-day i {
+  width: 100%;
+  min-height: 4px;
+  height: max(4px, calc(var(--habit-rate) * 76px));
+  border-radius: 7px 7px 3px 3px;
+  background: color-mix(in srgb, var(--primary), white 18%);
+}
+
+.habit-trend-day.is-empty i {
+  height: 4px;
+  background: var(--line);
+}
+
+.habit-trend-day span {
+  color: var(--muted);
+  font-size: 0.58rem;
+}
+
+.habit-heatmap-scroller {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+}
+
+.habit-heatmap {
+  display: grid;
+  grid-template-rows: repeat(7, 13px);
+  grid-auto-flow: column;
+  grid-auto-columns: 13px;
+  gap: 4px;
+  width: max-content;
+  min-width: 100%;
+  padding: 2px;
+}
+
+.habit-heatmap i,
+.habit-heatmap-legend i {
+  display: block;
+  border-radius: 4px;
+}
+
+.habit-heatmap-cell,
+.habit-heatmap-spacer {
+  width: 13px;
+  height: 13px;
+}
+
+.habit-heatmap-cell.is-empty,
+.habit-heatmap-legend .is-empty {
+  border: 1px solid var(--line);
+  background: transparent;
+}
+
+.habit-heatmap-cell.level-0,
+.habit-heatmap-legend .level-0 { background: color-mix(in srgb, var(--primary), var(--surface) 90%); }
+.habit-heatmap-cell.level-1,
+.habit-heatmap-legend .level-1 { background: color-mix(in srgb, var(--primary), var(--surface) 72%); }
+.habit-heatmap-cell.level-2,
+.habit-heatmap-legend .level-2 { background: color-mix(in srgb, var(--primary), var(--surface) 52%); }
+.habit-heatmap-cell.level-3,
+.habit-heatmap-legend .level-3 { background: color-mix(in srgb, var(--primary), var(--surface) 28%); }
+.habit-heatmap-cell.level-4,
+.habit-heatmap-legend .level-4 { background: var(--primary); }
+
+.habit-heatmap-legend {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 0.65rem;
+  font-weight: 800;
+}
+
+.habit-heatmap-legend i {
+  width: 11px;
+  height: 11px;
+}
+
+.habit-checkin-section {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
 }
 
 .habit-day-button {
@@ -3455,7 +3702,7 @@ button.timeline-task-card {
   align-content: start;
   gap: 10px;
   min-height: 0;
-  overflow-y: auto;
+  overflow: visible;
   padding: 1px 2px 14px;
 }
 
@@ -4982,11 +5229,19 @@ button.timeline-task-card {
 
 @media (max-width: 560px) {
   .habit-panel {
-    grid-template-rows: auto auto auto minmax(0, 1fr) auto;
     height: calc(100dvh - 134px);
     min-height: 0;
-    overflow: hidden;
+    overflow: hidden auto;
+    overscroll-behavior-y: contain;
     padding: 14px;
+  }
+
+  .habit-stats-card {
+    padding: 14px;
+  }
+
+  .habit-stats-filter select {
+    max-width: 128px;
   }
 
   .habit-week-strip {
@@ -5009,6 +5264,23 @@ button.timeline-task-card {
   .habit-day-summary {
     grid-template-columns: 1fr;
     gap: 7px;
+  }
+
+  .habit-week-overview {
+    gap: 3px;
+  }
+
+  .habit-week-overview-day strong {
+    font-size: 0.6rem;
+  }
+
+  .habit-trend-chart {
+    gap: 3px;
+  }
+
+  .habit-heatmap-scroller {
+    margin-inline: -2px;
+    padding-bottom: 5px;
   }
 
   .habit-card {
