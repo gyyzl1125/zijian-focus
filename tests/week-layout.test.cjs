@@ -178,7 +178,7 @@ function createHarness({ state = baseState(), selectedWeekDate = TODAY } = {}) {
     document,
     state,
     DailyPlanner,
-    matchMedia() { return { matches: true }; },
+    matchMedia() { return { matches: false }; },
     globalThis: null,
     selectedTimelineDate: MONDAY,
     selectedWeekDate,
@@ -338,13 +338,13 @@ test("very short events use compact cards and preserve real detail times", () =>
   harness.restore();
 });
 
-test("rendering defaults the scroll target to today's column", () => {
+test("desktop rendering keeps seven aligned headers and columns", () => {
   const harness = createHarness();
   harness.api.renderWeekSchedule();
-  const today = harness.els.weekBoard.querySelector(`[data-day-key="${TODAY}"]`);
-  assert.equal(harness.scrollCalls, 1);
-  assert.equal(today.dataset.scrollInline, "center");
-  assert.equal(harness.els.weekDayHeaders.scrollLeft, harness.els.weekBoard.scrollLeft);
+  assert.equal(harness.els.weekDayHeaders.children.length, 7);
+  assert.equal(harness.els.weekBoard.children.length, 7);
+  assert.equal(harness.els.weekBoard.querySelectorAll(".week-column").length, 7);
+  assert.equal(harness.scrollCalls, 0);
   harness.restore();
 });
 
@@ -360,23 +360,21 @@ test("content scrolling keeps the date headers in the same horizontal coordinate
 test("ordinary rerender preserves the user's current week scroll position", () => {
   const harness = createHarness();
   harness.api.renderWeekSchedule();
-  assert.equal(harness.scrollCalls, 1);
   harness.els.weekBoard.scrollLeft = 308;
   harness.api.syncWeekHeaderScroll();
   harness.api.renderWeekSchedule();
-  assert.equal(harness.scrollCalls, 1);
+  assert.equal(harness.scrollCalls, 0);
   assert.equal(harness.els.weekBoard.scrollLeft, 308);
   assert.equal(harness.els.weekDayHeaders.scrollLeft, 308);
   harness.restore();
 });
 
-test("explicit navigation to a week without today positions the Monday column", () => {
+test("desktop navigation announces a new week without changing the seven-column layout", () => {
   const nextMonday = "2026-07-27";
   const harness = createHarness({ selectedWeekDate: nextMonday });
   harness.api.renderWeekSchedule({ reposition: true, announce: true });
-  const monday = harness.els.weekBoard.querySelector(`[data-day-key="${nextMonday}"]`);
-  assert.equal(monday.dataset.scrollInline, "start");
-  assert.equal(harness.els.weekDayHeaders.scrollLeft, harness.els.weekBoard.scrollLeft);
+  assert.equal(harness.els.weekBoard.children.length, 7);
+  assert.equal(harness.scrollCalls, 0);
   assert.match(harness.els.weekNavigationStatus.textContent, /已切换到/);
   harness.restore();
 });
@@ -408,13 +406,13 @@ test("week rendering is read-only for plans and focus statistics", () => {
   harness.restore();
 });
 
-test("mobile week CSS scrolls horizontally with readable day widths", () => {
-  assert.match(stylesSource, /--week-mobile-column-width: 148px/);
-  assert.match(stylesSource, /\.week-day-headers \{[\s\S]*?grid-template-columns: repeat\(7, minmax\(var\(--week-mobile-column-width\), var\(--week-mobile-column-width\)\)\)/);
-  assert.match(stylesSource, /@media \(max-width: 560px\)[\s\S]*?\.week-board \{[\s\S]*?grid-template-columns: repeat\(7, minmax\(var\(--week-mobile-column-width\), var\(--week-mobile-column-width\)\)\)/);
-  assert.match(stylesSource, /\.week-board \{[\s\S]*?overflow-x: auto;/);
-  assert.match(stylesSource, /scroll-snap-type: x proximity/);
-  assert.match(stylesSource, /\.week-column \{[\s\S]*?scroll-snap-align: start;/);
+test("mobile week CSS uses a seven-day capsule strip and a vertical single-day list", () => {
+  const mobileRule = stylesSource.slice(stylesSource.indexOf("@media (max-width: 560px)"));
+  assert.match(mobileRule, /\.week-day-headers \{[\s\S]*?grid-template-columns: repeat\(7, minmax\(0, 1fr\)\)/);
+  assert.match(mobileRule, /\.week-board \{[\s\S]*?overflow-x: hidden;[\s\S]*?overflow-y: auto;/);
+  assert.match(mobileRule, /\.week-mobile-day-list \{[\s\S]*?display: grid;/);
+  assert.match(mobileRule, /\.week-mobile-plan-card \{[\s\S]*?width: 100%;[\s\S]*?min-width: 0;/);
+  assert.doesNotMatch(mobileRule, /scroll-snap-type: x proximity/);
 });
 
 test("week cards enforce minimum height and clip compact text", () => {

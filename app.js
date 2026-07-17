@@ -2196,6 +2196,146 @@ function renderTimeline(now = Date.now()) {
   });
 }
 
+function isMobileWeekSchedule() {
+  return typeof globalThis.matchMedia === "function" && globalThis.matchMedia("(max-width: 560px)").matches;
+}
+
+function getPlannedItemsForDay(dayKeyValue) {
+  const bounds = getDayBounds(dayKeyValue);
+  if (!bounds) return [];
+  const courses = getDayCourses(dayKeyValue)
+    .map((course) => ({ ...course, type: "course" }));
+  const tasks = (Array.isArray(state.tasks) ? state.tasks : [])
+    .filter((task) => Number.isFinite(Number(task?.startAt))
+      && dateKey(new Date(Number(task.startAt))) === dayKeyValue)
+    .map((task) => ({ ...task, type: "task" }));
+  const plannedFocus = getAdoptedFocusBlocksForDay(dayKeyValue);
+  return [...courses, ...tasks, ...plannedFocus]
+    .filter((item) => Number.isFinite(Number(item.startAt))
+      && Number.isFinite(Number(item.endAt))
+      && Number(item.endAt) > Number(item.startAt))
+    .map((item) => ({
+      ...item,
+      detailItem: { ...item },
+      startAt: Math.max(Number(item.startAt), bounds.startAt),
+      endAt: Math.min(Number(item.endAt), bounds.endAt),
+    }))
+    .filter((item) => item.endAt > item.startAt)
+    .sort((a, b) => a.startAt - b.startAt
+      || a.endAt - b.endAt
+      || weekEventDisplayPriority(a) - weekEventDisplayPriority(b)
+      || String(a.id).localeCompare(String(b.id)));
+}
+
+function getMobilePlannedItemStatuses(item, items, now = Date.now()) {
+  const statuses = [];
+  const conflicts = items.some((other) => (String(other.id) !== String(item.id) || other.type !== item.type)
+    && Number(other.startAt) < Number(item.endAt)
+    && Number(other.endAt) > Number(item.startAt));
+  if (conflicts) statuses.push("冲突");
+  if (item.type === "task" && item.done) statuses.push("已完成");
+  if (item.type === "task" && !item.done && Number(item.endAt) < Number(now)) statuses.push("已过期");
+  if (item.type === "planned-focus" && item.orphaned) statuses.push("原任务已删除");
+  return statuses;
+}
+
+function getMobilePlannedItemLabel(item) {
+  if (item.type === "course") return "课程";
+  if (item.type === "planned-focus") {
+    return item.planningMode === "deadline-sprint" ? "截止前冲刺" : "计划专注";
+  }
+  return "任务";
+}
+
+function renderMobileWeekSchedule(weekStart, weekEnd, options = {}) {
+  const labels = ["一", "二", "三", "四", "五", "六", "日"];
+  const todayKey = dateKey();
+  const now = Date.now();
+  els.weekDayHeaders?.classList.add("is-mobile-day-strip");
+  els.weekBoard.classList.add("is-mobile-day-board");
+  els.weekDayHeaders?.replaceChildren();
+  els.weekBoard.replaceChildren();
+
+  for (let index = 0; index < 7; index += 1) {
+    const day = new Date(weekStart);
+    day.setDate(weekStart.getDate() + index);
+    const key = dateKey(day);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "week-day-header";
+    button.dataset.dayKey = key;
+    button.classList.toggle("is-today", key === todayKey);
+    button.classList.toggle("is-selected", key === selectedWeekDate);
+    button.setAttribute("aria-pressed", String(key === selectedWeekDate));
+    button.setAttribute("aria-label", `周${labels[index]} ${day.getMonth() + 1}月${day.getDate()}日`);
+    const headerLabel = document.createElement("span");
+    headerLabel.textContent = `周${labels[index]}`;
+    const headerDate = document.createElement("strong");
+    headerDate.textContent = String(day.getDate());
+    button.append(headerLabel, headerDate);
+    button.addEventListener("click", () => {
+      if (key === selectedWeekDate) return;
+      selectedWeekDate = key;
+      renderWeekSchedule({ announceDay: true });
+    });
+    els.weekDayHeaders?.append(button);
+  }
+
+  const items = getPlannedItemsForDay(selectedWeekDate);
+  const list = document.createElement("div");
+  list.className = "week-mobile-day-list";
+  list.dataset.dayKey = selectedWeekDate;
+  if (items.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "week-mobile-empty";
+    empty.textContent = "这一天还没有计划";
+    list.append(empty);
+  } else {
+    items.forEach((item) => {
+      const detailItem = item.detailItem || item;
+      const card = document.createElement("button");
+      card.type = "button";
+      card.className = `week-mobile-plan-card is-${item.type}`;
+      const color = getTaskColor(item.color || (item.type === "course" ? "sky" : "sage"));
+      card.style.setProperty("--week-block-bg", color.bg);
+      card.style.setProperty("--week-block-border", color.border);
+      card.style.setProperty("--week-block-ink", color.ink);
+      const time = document.createElement("span");
+      time.className = "week-mobile-plan-time";
+      time.textContent = `${formatClock(item.startAt)}–${formatClock(item.endAt)}`;
+      const body = document.createElement("span");
+      body.className = "week-mobile-plan-body";
+      const title = document.createElement("strong");
+      title.textContent = String(item.title || "未命名安排");
+      const meta = document.createElement("span");
+      meta.className = "week-mobile-plan-meta";
+      const type = document.createElement("small");
+      type.className = "week-mobile-plan-type";
+      type.textContent = getMobilePlannedItemLabel(item);
+      meta.append(type);
+      getMobilePlannedItemStatuses(item, items, now).forEach((statusText) => {
+        const status = document.createElement("small");
+        status.className = "week-mobile-plan-status";
+        status.textContent = statusText;
+        meta.append(status);
+      });
+      body.append(title, meta);
+      card.append(time, body);
+      card.setAttribute("aria-label", `${time.textContent} ${type.textContent} ${title.textContent}`);
+      card.addEventListener("click", () => showEventDetail(detailItem));
+      list.append(card);
+    });
+  }
+  els.weekBoard.append(list);
+  if ((options.announce || options.announceDay) && els.weekNavigationStatus) {
+    const selected = new Date(`${selectedWeekDate}T00:00:00`);
+    els.weekNavigationStatus.textContent = options.announce
+      ? `已切换到 ${formatMonthDay(weekStart)}–${formatMonthDay(weekEnd)}`
+      : `已选择 ${formatMonthDay(selected)}`;
+  }
+  if (options.releaseShiftLock) weekShiftInProgress = false;
+}
+
 function layoutOverlappingEvents(events) {
   const sorted = (Array.isArray(events) ? events : [])
     .filter((event) => event && typeof event === "object"
@@ -2347,6 +2487,7 @@ function showWeekOverlapSummary(events) {
 
 function syncWeekHeaderScroll() {
   if (!els.weekBoard || !els.weekDayHeaders) return;
+  if (isMobileWeekSchedule()) return;
   els.weekDayHeaders.scrollLeft = Number(els.weekBoard.scrollLeft) || 0;
 }
 
@@ -2380,6 +2521,12 @@ function renderWeekSchedule(options = {}) {
   if (options.announce && els.weekNavigationStatus) {
     els.weekNavigationStatus.textContent = `已切换到 ${formatMonthDay(start)}–${formatMonthDay(end)}`;
   }
+  if (isMobileWeekSchedule()) {
+    renderMobileWeekSchedule(start, end, options);
+    return;
+  }
+  els.weekDayHeaders?.classList.remove("is-mobile-day-strip");
+  els.weekBoard.classList.remove("is-mobile-day-board");
   els.weekDayHeaders?.replaceChildren();
   els.weekBoard.replaceChildren();
 
@@ -2404,20 +2551,12 @@ function renderWeekSchedule(options = {}) {
 
     const list = document.createElement("div");
     list.className = "week-course-list is-timed";
-    const courses = getDayCourses(key).map((course) => ({ ...course, type: "course" }));
-    const tasks = state.tasks
-      .filter((task) => dateKey(new Date(task.startAt)) === key)
-      .map((task) => ({ ...task, type: "task" }));
-    const plannedFocus = getAdoptedFocusBlocksForDay(key);
     const dayWindowStart = new Date(day.getFullYear(), day.getMonth(), day.getDate(), dayStartHour).getTime();
     const dayWindowEnd = new Date(day.getFullYear(), day.getMonth(), day.getDate(), dayEndHour).getTime();
-    const calendarDayStart = new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime();
-    const calendarDayEnd = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1).getTime();
-    const items = [...courses, ...tasks, ...plannedFocus]
-      .filter((item) => Number(item.startAt) < calendarDayEnd && Number(item.endAt) > calendarDayStart)
+    const items = getPlannedItemsForDay(key)
       .map((item) => {
-        const originalStartAt = Math.max(Number(item.startAt), calendarDayStart);
-        const originalEndAt = Math.min(Number(item.endAt), calendarDayEnd);
+        const originalStartAt = item.startAt;
+        const originalEndAt = item.endAt;
         const duration = Math.max(60000, originalEndAt - originalStartAt);
         const startAt = originalEndAt <= dayWindowStart
           ? dayWindowStart
@@ -2425,7 +2564,7 @@ function renderWeekSchedule(options = {}) {
         const endAt = originalEndAt <= dayWindowStart
           ? Math.min(dayWindowEnd, dayWindowStart + duration)
           : originalStartAt >= dayWindowEnd ? dayWindowEnd : Math.min(originalEndAt, dayWindowEnd);
-        return { ...item, detailItem: item, startAt, endAt };
+        return { ...item, startAt, endAt };
       });
     const laidOutItems = layoutOverlappingEvents(items);
     column.classList.toggle("is-empty", items.length === 0);
@@ -2515,14 +2654,7 @@ function renderWeekSchedule(options = {}) {
     column.append(list);
     els.weekBoard.append(column);
   }
-  const mobileWeek = typeof globalThis.matchMedia === "function" && globalThis.matchMedia("(max-width: 560px)").matches;
-  const shouldPosition = mobileWeek && (Boolean(options.reposition) || !weekScrollInitialized);
-  if (shouldPosition) {
-    weekScrollInitialized = true;
-    const todayKey = dateKey();
-    const targetDayKey = todayKey >= dateKey(start) && todayKey <= dateKey(end) ? todayKey : dateKey(start);
-    scheduleWeekBoardPosition(targetDayKey, Boolean(options.releaseShiftLock));
-  } else if (options.releaseShiftLock) {
+  if (options.releaseShiftLock) {
     weekShiftInProgress = false;
     syncWeekHeaderScroll();
   } else {
@@ -5841,6 +5973,16 @@ function shiftWeekSchedule(direction) {
   return true;
 }
 
+function shiftMobileWeekDay(direction) {
+  if (!isMobileWeekSchedule() || ![-1, 1].includes(Number(direction))) return false;
+  const date = new Date(`${selectedWeekDate}T00:00:00`);
+  if (!Number.isFinite(date.getTime())) return false;
+  date.setDate(date.getDate() + Number(direction));
+  selectedWeekDate = dateKey(date);
+  renderWeekSchedule({ announceDay: true });
+  return true;
+}
+
 function shiftStatsWeek(direction) {
   const date = new Date(`${selectedStatsWeekDate}T00:00:00`);
   date.setDate(date.getDate() + direction * 7);
@@ -5860,6 +6002,50 @@ els.weekStrip.addEventListener("touchend", (event) => {
 }, { passive: true });
 
 els.weekBoard?.addEventListener("scroll", syncWeekHeaderScroll, { passive: true });
+
+let weekMobileDayGesture = null;
+let weekMobileSwipeEndedAt = -Infinity;
+function startWeekMobileDayGesture(event) {
+  if (!isMobileWeekSchedule() || event?.isPrimary === false
+    || (event?.pointerType === "mouse" && event?.button !== 0)) return;
+  weekMobileDayGesture = {
+    pointerId: event.pointerId,
+    startX: Number(event.clientX),
+    startY: Number(event.clientY),
+    startTime: weekGestureTime(event),
+  };
+}
+
+function finishWeekMobileDayGesture(event) {
+  if (!weekMobileDayGesture || event.pointerId !== weekMobileDayGesture.pointerId) return false;
+  const gesture = weekMobileDayGesture;
+  weekMobileDayGesture = null;
+  const deltaX = Number(event.clientX) - gesture.startX;
+  const deltaY = Number(event.clientY) - gesture.startY;
+  const duration = weekGestureTime(event) - gesture.startTime;
+  const isHorizontalSwipe = Math.abs(deltaX) >= 50
+    && Math.abs(deltaX) > Math.abs(deltaY) * 1.4
+    && duration >= 0
+    && duration <= 600;
+  if (!isHorizontalSwipe) return false;
+  weekMobileSwipeEndedAt = Date.now();
+  return shiftMobileWeekDay(deltaX < 0 ? 1 : -1);
+}
+
+function cancelWeekMobileDayGesture(event) {
+  if (!weekMobileDayGesture
+    || (event?.pointerId !== undefined && event.pointerId !== weekMobileDayGesture.pointerId)) return;
+  weekMobileDayGesture = null;
+}
+
+els.weekBoard?.addEventListener("pointerdown", startWeekMobileDayGesture, { passive: true });
+els.weekBoard?.addEventListener("pointerup", finishWeekMobileDayGesture, { passive: true });
+els.weekBoard?.addEventListener("pointercancel", cancelWeekMobileDayGesture, { passive: true });
+els.weekBoard?.addEventListener("click", (event) => {
+  if (Date.now() - weekMobileSwipeEndedAt > 400) return;
+  event.preventDefault();
+  event.stopPropagation();
+}, true);
 
 let weekHeaderGesture = null;
 function weekGestureTime(event) {
@@ -5905,7 +6091,7 @@ function finishWeekHeaderGesture(event) {
     && Math.abs(deltaX) > Math.abs(deltaY) * 1.4
     && duration >= 0
     && duration <= 600;
-  if (!isHorizontalSwipe || weekShiftInProgress) return false;
+  if (!isHorizontalSwipe || weekShiftInProgress || isMobileWeekSchedule()) return false;
   return shiftWeekSchedule(deltaX < 0 ? 1 : -1);
 }
 

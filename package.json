@@ -14,6 +14,7 @@
     "test:planner-schedule": "node --test tests/planner-schedule.test.cjs",
     "test:week-layout": "node --test tests/week-layout.test.cjs",
     "test:week-gesture": "node --test tests/week-gesture.test.cjs",
+    "test:mobile-week-schedule": "node --test tests/mobile-week-schedule.test.cjs",
     "test:activity-sessions": "node --test tests/activity-sessions.test.cjs",
     "test:activity-sync": "node --test tests/activity-sync.test.cjs",
     "test:activity-timeline": "node --test tests/activity-timeline.test.cjs",

@@ -34,6 +34,7 @@ function createHarness() {
       shifts.push(direction);
       return true;
     }
+    function isMobileWeekSchedule() { return false; }
     ${gestureSource}
     this.api = {
       start: startWeekHeaderGesture,
@@ -135,19 +136,18 @@ test("pointer cancellation clears gesture state without switching", () => {
   assert.deepEqual(recordedShifts(harness), []);
 });
 
-test("the content scroller has no week-switch touch or pointer listener", () => {
-  assert.doesNotMatch(appSource, /weekBoard\.addEventListener\(["'](?:touch|pointer)/);
+test("the content region owns mobile day swipes while the header keeps desktop week gestures", () => {
+  assert.match(appSource, /weekBoard\?\.addEventListener\("pointerdown", startWeekMobileDayGesture/);
+  assert.match(appSource, /weekBoard\?\.addEventListener\("pointerup", finishWeekMobileDayGesture/);
   assert.match(appSource, /weekDayHeaders\?\.addEventListener\("pointerdown"/);
   assert.match(appSource, /weekDayHeaders\?\.addEventListener\("pointerup"/);
 });
 
-test("content scrolling remains native, contained and snap-based on mobile", () => {
+test("mobile content scrolls vertically and no longer uses horizontal seven-column snapping", () => {
   const mobileRule = stylesSource.slice(stylesSource.indexOf("@media (max-width: 560px)"));
-  assert.match(mobileRule, /\.week-board \{[\s\S]*?overflow-x: auto;/);
-  assert.match(mobileRule, /\.week-board \{[\s\S]*?scroll-snap-type: x proximity;/);
-  assert.match(mobileRule, /\.week-board \{[\s\S]*?overscroll-behavior-x: contain;/);
-  assert.match(mobileRule, /\.week-board \{[\s\S]*?touch-action: pan-x pan-y;/);
-  assert.match(mobileRule, /\.week-column \{[\s\S]*?scroll-snap-align: start;/);
+  assert.match(mobileRule, /\.week-board \{[\s\S]*?overflow-x: hidden;[\s\S]*?overflow-y: auto;/);
+  assert.match(mobileRule, /\.week-board \{[\s\S]*?touch-action: pan-y;/);
+  assert.doesNotMatch(mobileRule, /scroll-snap-type: x proximity;/);
 });
 
 test("header gesture detection never prevents default scrolling or clicking", () => {
