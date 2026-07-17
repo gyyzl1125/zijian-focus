@@ -5,6 +5,7 @@ const ASSETS = [
   "./styles.css?v=53",
   "./fflate.min.js?v=52",
   "./daily-planner.js?v=53",
+  "./activity-sessions.js?v=1",
   "./app.js?v=53",
   "./manifest.webmanifest?v=52",
   "./icon.svg?v=52",

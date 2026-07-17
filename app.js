@@ -89,6 +89,8 @@ const defaultState = {
   selectedMemoTag: "全部",
   focusSessions: [],
   focusByDate: {},
+  activitySessions: [],
+  activeActivitySessionId: null,
   selectedTaskColor: "sage",
   heatmapPalette: "forest",
   heatmapImage: "",
@@ -472,6 +474,17 @@ function filterDeletedEntities(items, deletionMap) {
 }
 
 function normalizeState() {
+  const activityApi = globalThis.ActivitySessions;
+  if (activityApi?.normalizeActivitySessions && activityApi?.repairActiveActivitySessionId) {
+    state.activitySessions = activityApi.normalizeActivitySessions(state.activitySessions, Date.now());
+    state.activeActivitySessionId = activityApi.repairActiveActivitySessionId(
+      state.activitySessions,
+      state.activeActivitySessionId
+    );
+  } else {
+    state.activitySessions = Array.isArray(state.activitySessions) ? state.activitySessions : [];
+    state.activeActivitySessionId = null;
+  }
   state.deletions = normalizeDeletionRegistry(state.deletions);
   state.tasks = filterDeletedEntities(state.tasks, state.deletions.tasks);
   state.flames = Number(state.flames || 0);
@@ -672,6 +685,17 @@ function mergeSyncedStates(local, remote) {
   ["courses", "focusSessions", "flameLedger", "transactions"].forEach((key) => {
     merged[key] = mergeById(local?.[key], remote?.[key], preferRemote);
   });
+  const activityApi = globalThis.ActivitySessions;
+  if (activityApi?.mergeActivitySessions && activityApi?.repairActiveActivitySessionId) {
+    merged.activitySessions = activityApi.mergeActivitySessions(local?.activitySessions, remote?.activitySessions);
+    merged.activeActivitySessionId = activityApi.repairActiveActivitySessionId(
+      merged.activitySessions,
+      preferred?.activeActivitySessionId
+    );
+  } else {
+    merged.activitySessions = mergeById(local?.activitySessions, remote?.activitySessions, preferRemote);
+    merged.activeActivitySessionId = null;
+  }
   merged.tasks = filterDeletedEntities(
     mergeById(local?.tasks, remote?.tasks, preferRemote),
     merged.deletions.tasks
@@ -700,6 +724,17 @@ function mergeSyncedStates(local, remote) {
 
 function cloudSafeState() {
   const snapshot = structuredClone(state);
+  const activityApi = globalThis.ActivitySessions;
+  if (activityApi?.normalizeActivitySessions && activityApi?.repairActiveActivitySessionId) {
+    snapshot.activitySessions = activityApi.normalizeActivitySessions(snapshot.activitySessions, Date.now());
+    snapshot.activeActivitySessionId = activityApi.repairActiveActivitySessionId(
+      snapshot.activitySessions,
+      snapshot.activeActivitySessionId
+    );
+  } else {
+    snapshot.activitySessions = Array.isArray(snapshot.activitySessions) ? snapshot.activitySessions : [];
+    snapshot.activeActivitySessionId = null;
+  }
   snapshot.deletions = normalizeDeletionRegistry(snapshot.deletions);
   snapshot.tasks = filterDeletedEntities(snapshot.tasks, snapshot.deletions.tasks);
   snapshot.memos = filterDeletedEntities(snapshot.memos, snapshot.deletions.memos);

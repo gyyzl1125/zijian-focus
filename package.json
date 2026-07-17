@@ -14,6 +14,8 @@
     "test:planner-schedule": "node --test tests/planner-schedule.test.cjs",
     "test:week-layout": "node --test tests/week-layout.test.cjs",
     "test:week-gesture": "node --test tests/week-gesture.test.cjs",
+    "test:activity-sessions": "node --test tests/activity-sessions.test.cjs",
+    "test:activity-sync": "node --test tests/activity-sync.test.cjs",
     "test:deadline-sprint": "node --test tests/deadline-sprint.test.cjs",
     "test:deadline-sprint-dom": "node --test tests/deadline-sprint-dom.test.cjs",
     "test:deadline-sprint-adoption": "node --test tests/deadline-sprint-adoption.test.cjs",
