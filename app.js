@@ -180,7 +180,11 @@ const els = {
   flameEarnedWeek: document.querySelector("#flameEarnedWeek"),
   flameSpentWeek: document.querySelector("#flameSpentWeek"),
   flameBalanceText: document.querySelector("#flameBalanceText"),
+  habitPanel: document.querySelector("#habitPanel"),
   habitAddButton: document.querySelector("#habitAddButton"),
+  habitOnboarding: document.querySelector("#habitOnboarding"),
+  habitOnboardingButton: document.querySelector("#habitOnboardingButton"),
+  habitContentSections: [...document.querySelectorAll("[data-habit-content]")],
   habitStatsFilter: document.querySelector("#habitStatsFilter"),
   habitTodayRate: document.querySelector("#habitTodayRate"),
   habitTodayDetail: document.querySelector("#habitTodayDetail"),
@@ -2226,6 +2230,7 @@ function renderTimeline(now = Date.now()) {
   els.timelineStats.textContent = `${timelineItems.length}次 · ${totalMinutes}分钟`;
 
   els.timelineList.replaceChildren();
+  els.timelineList.closest(".timeline-card")?.classList.toggle("is-empty-state", timelineItems.length === 0);
   if (timelineItems.length === 0) {
     const empty = document.createElement("li");
     empty.className = "timeline-empty";
@@ -2347,6 +2352,7 @@ function renderMobileWeekSchedule(weekStart, weekEnd, options = {}) {
   }
 
   const items = getPlannedItemsForDay(selectedWeekDate);
+  els.weekBoard.closest(".week-schedule")?.classList.toggle("is-empty-state", items.length === 0);
   const list = document.createElement("div");
   list.className = "week-mobile-day-list";
   list.dataset.dayKey = selectedWeekDate;
@@ -2594,6 +2600,7 @@ function renderWeekSchedule(options = {}) {
   els.weekBoard.classList.remove("is-mobile-day-board");
   els.weekDayHeaders?.replaceChildren();
   els.weekBoard.replaceChildren();
+  let hasPlannedItems = false;
 
   for (let index = 0; index < 7; index += 1) {
     const day = new Date(start);
@@ -2631,6 +2638,7 @@ function renderWeekSchedule(options = {}) {
           : originalStartAt >= dayWindowEnd ? dayWindowEnd : Math.min(originalEndAt, dayWindowEnd);
         return { ...item, startAt, endAt };
       });
+    hasPlannedItems ||= items.length > 0;
     const laidOutItems = layoutOverlappingEvents(items);
     column.classList.toggle("is-empty", items.length === 0);
     column.classList.toggle("is-light", items.length === 1);
@@ -2719,6 +2727,7 @@ function renderWeekSchedule(options = {}) {
     column.append(list);
     els.weekBoard.append(column);
   }
+  els.weekBoard.closest(".week-schedule")?.classList.toggle("is-empty-state", !hasPlannedItems);
   if (options.releaseShiftLock) {
     weekShiftInProgress = false;
     syncWeekHeaderScroll();
@@ -3574,6 +3583,17 @@ function selectHabitStatsFilter(value) {
 
 function renderHabits() {
   if (!els.habitList || !habitApi()) return;
+  const activeHabits = habitApi().normalizeHabits(state.habits, Date.now()).filter((habit) => habit.archivedAt === null);
+  const hasActiveHabits = activeHabits.length > 0;
+  els.habitPanel?.classList.toggle("is-empty-state", !hasActiveHabits);
+  if (els.habitOnboarding) els.habitOnboarding.hidden = hasActiveHabits;
+  els.habitContentSections?.forEach((section) => { section.hidden = !hasActiveHabits; });
+  if (!hasActiveHabits) {
+    selectedHabitStatsFilter = "all";
+    els.habitList.replaceChildren();
+    els.habitEmpty.hidden = true;
+    return;
+  }
   renderHabitWeekStrip();
   const habits = habitApi().getHabitsForDay(state.habits, selectedHabitDate);
   const entries = habitApi().normalizeHabitEntries(state.habitEntries, Date.now());
@@ -4260,6 +4280,7 @@ function renderWeekChart() {
 
   els.weekChartTotal.textContent = `${total === 0 ? "0分钟" : formatDuration(0, total * 60000)} · ${formatMonthDay(start)}-${formatMonthDay(end)}`;
   els.weekChart.innerHTML = "";
+  els.weekChart.closest(".week-chart-card")?.classList.toggle("is-empty-state", total === 0);
   values.forEach((minutes, index) => {
     const item = document.createElement("div");
     item.className = "week-bar-item";
@@ -6206,6 +6227,7 @@ els.timelineTaskSelect?.addEventListener("change", () => {
 els.timelineStartButton?.addEventListener("click", () => startSelectedTaskActivity(Date.now()));
 els.timelineEndButton?.addEventListener("click", () => endCurrentTaskActivity(Date.now()));
 els.habitAddButton?.addEventListener("click", () => openHabitEditor());
+els.habitOnboardingButton?.addEventListener("click", () => openHabitEditor());
 els.habitStatsFilter?.addEventListener("change", () => selectHabitStatsFilter(els.habitStatsFilter.value));
 els.habitEditorBackdrop?.addEventListener("click", closeHabitEditor);
 els.habitEditorClose?.addEventListener("click", closeHabitEditor);

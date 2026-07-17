@@ -54,7 +54,11 @@ function createHarness({ state = baseState(), saveFails = false, confirmResult =
     structuredClone,
     crypto: { randomUUID() { idCounter += 1; return `created-${idCounter}`; } },
     els: {
+      habitPanel: document.querySelector("#habitPanel"),
       habitAddButton: document.querySelector("#habitAddButton"),
+      habitOnboarding: document.querySelector("#habitOnboarding"),
+      habitOnboardingButton: document.querySelector("#habitOnboardingButton"),
+      habitContentSections: [...document.querySelectorAll("[data-habit-content]")],
       habitStatsFilter: document.querySelector("#habitStatsFilter"),
       habitTodayRate: document.querySelector("#habitTodayRate"),
       habitTodayDetail: document.querySelector("#habitTodayDetail"),
@@ -157,6 +161,15 @@ test("render shows seven dates, selected day and a derived completion summary", 
   assert.equal(harness.els.habitCompletionText.textContent, "1 / 1 完成");
   assert.equal(Number(harness.els.habitCompletionProgress.value), 100);
   assert.equal(Object.hasOwn(harness.state.habits[0], "completionRate"), false);
+});
+
+test("no active habits show only the compact creation guide", () => {
+  const harness = createHarness();
+  harness.api.renderHabits();
+  assert.equal(harness.els.habitOnboarding.hidden, false);
+  assert.equal(harness.els.habitPanel.classList.contains("is-empty-state"), true);
+  assert.equal(harness.els.habitContentSections.every((section) => section.hidden), true);
+  assert.match(harness.els.habitOnboarding.textContent, /创建第一个习惯/);
 });
 
 test("creating a boolean habit saves once and leaves unrelated state unchanged", () => {

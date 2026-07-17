@@ -5719,3 +5719,218 @@ body {
     gap: 10px;
   }
 }
+
+/* Final UI consistency pass */
+.task-panel-actions {
+  display: grid;
+  grid-template-columns: repeat(4, auto);
+  gap: 7px;
+}
+
+.task-toolbar-button,
+.notify-button.task-toolbar-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 0;
+  min-height: 42px;
+  padding: 0 11px;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.task-toolbar-button > span[aria-hidden="true"] {
+  display: grid;
+  place-items: center;
+  width: 17px;
+  min-width: 17px;
+  font-size: 0.9rem;
+}
+
+.task-toolbar-button .bell-icon {
+  width: 14px;
+  height: 14px;
+  border-width: 1.5px;
+}
+
+.task-toolbar-button .bell-icon::before {
+  bottom: -4px;
+  width: 18px;
+}
+
+.task-toolbar-button .bell-icon::after {
+  bottom: -7px;
+  width: 5px;
+  height: 5px;
+}
+
+.timeline-card.is-empty-state,
+.week-schedule.is-empty-state {
+  min-height: 0;
+}
+
+.timeline-card.is-empty-state .timeline-empty,
+.week-schedule.is-empty-state .week-mobile-empty {
+  padding: 18px 14px;
+}
+
+.week-schedule.is-empty-state .week-board {
+  height: 180px;
+  min-height: 180px;
+}
+
+.week-chart-card.is-empty-state .week-chart {
+  height: 88px;
+  padding-top: 10px;
+}
+
+.memo-tags {
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.memo-tag {
+  min-height: 34px;
+}
+
+.memo-tags-hint {
+  display: none;
+  margin: -7px 0 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-align: right;
+}
+
+.habit-onboarding {
+  display: grid;
+  justify-items: center;
+  gap: 9px;
+  padding: 28px 18px;
+  border: 1px dashed var(--line);
+  border-radius: 20px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.habit-onboarding > span {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--soft);
+  color: var(--primary);
+  font-size: 1.5rem;
+  font-weight: 900;
+}
+
+.habit-onboarding strong {
+  color: var(--ink);
+  font-size: 1.05rem;
+}
+
+.habit-onboarding p {
+  max-width: 360px;
+  margin: 0;
+  font-size: 0.86rem;
+  line-height: 1.55;
+}
+
+.habit-onboarding button {
+  min-height: 44px;
+  border: 0;
+  border-radius: 14px;
+  padding: 0 18px;
+  background: var(--ink);
+  color: var(--surface);
+  font-weight: 900;
+}
+
+.habit-panel.is-empty-state {
+  min-height: 0;
+}
+
+.memo-panel {
+  grid-template-rows: auto auto auto auto minmax(0, 1fr);
+}
+
+.week-gesture-hint,
+.week-content-hint,
+.timeline-task-empty,
+.habit-section-label,
+.habit-stats-filter,
+.habit-week-overview-day,
+.habit-trend-day span,
+.habit-heatmap-legend,
+.week-mobile-plan-type,
+.week-mobile-plan-status {
+  font-size: max(0.72rem, 12px);
+}
+
+@media (max-width: 720px) {
+  .schedule-panel > .panel-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .task-panel-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .task-toolbar-button,
+  .notify-button.task-toolbar-button {
+    width: 100%;
+    min-height: 44px;
+    font-size: 0.8rem;
+  }
+
+  .memo-tags {
+    margin-right: -2px;
+    padding-right: 26px;
+    mask-image: linear-gradient(90deg, #000 0%, #000 91%, transparent 100%);
+  }
+
+  .memo-tags-hint {
+    display: block;
+  }
+}
+
+@media (max-width: 560px) {
+  .habit-panel.is-empty-state {
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+  }
+
+  .memo-panel {
+    grid-template-rows: auto auto auto auto minmax(0, 1fr);
+  }
+
+  .timeline-card.is-empty-state,
+  .week-schedule.is-empty-state {
+    height: auto;
+    max-height: none;
+    min-height: 0;
+  }
+
+  .week-schedule.is-empty-state {
+    grid-template-rows: auto auto auto auto auto auto;
+  }
+
+  .week-schedule.is-empty-state .week-board {
+    height: auto;
+    min-height: 72px;
+  }
+
+  .week-chart-card.is-empty-state .week-chart {
+    height: 82px;
+    padding-top: 8px;
+  }
+
+  .week-day-header span {
+    font-size: max(0.68rem, 11px);
+  }
+}

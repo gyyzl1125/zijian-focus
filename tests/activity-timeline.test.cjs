@@ -213,6 +213,7 @@ test("a short completion asks whether to keep it and cancelled short records sta
   assert.equal(state.activitySessions[0].minutes, 0);
   assert.equal(harness.saveCalls, 1);
   assert.match(harness.els.timelineList.textContent, /还没有实际活动记录/);
+  assert.equal(harness.els.timelineList.closest(".timeline-card").classList.contains("is-empty-state"), true);
 });
 
 test("keeping a short completion stores it as a one-minute actual record", () => {

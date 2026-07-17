@@ -168,6 +168,7 @@ test("mobile renders seven date capsules with separate today and selected states
   assert.equal(harness.els.weekDayHeaders.querySelector(".is-selected").dataset.dayKey, MONDAY);
   assert.equal(harness.els.weekDayHeaders.querySelector(".is-today").dataset.dayKey, TODAY);
   assert.notEqual(harness.els.weekDayHeaders.querySelector(".is-selected"), harness.els.weekDayHeaders.querySelector(".is-today"));
+  assert.equal(harness.els.weekBoard.closest(".week-schedule").classList.contains("is-empty-state"), true);
 });
 
 test("mobile renders one vertical day list without desktop columns, lanes or summaries", () => {

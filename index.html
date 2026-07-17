@@ -152,13 +152,13 @@
               <p class="eyebrow">Schedule</p>
               <h2>任务</h2>
             </div>
-            <div class="panel-actions">
-              <button class="icon-button notify-button" id="notifyButton" type="button" title="开启通知" aria-label="开启通知">
-                <span class="bell-icon" aria-hidden="true"></span>
+            <div class="panel-actions task-panel-actions" aria-label="任务提醒操作">
+              <button class="icon-button task-toolbar-button notify-button" id="notifyButton" type="button" title="开启通知" aria-label="开启通知">
+                <span class="bell-icon" aria-hidden="true"></span><span>通知</span>
               </button>
-              <button class="icon-button notification-test-button" id="testNotificationButton" type="button" title="测试系统提醒">测试</button>
-              <button class="icon-button notification-settings-button" id="notificationSettingsButton" type="button" title="打开系统通知设置">设置</button>
-              <button class="icon-button" id="clearDoneButton" type="button" title="清除已完成">✓</button>
+              <button class="icon-button task-toolbar-button notification-test-button" id="testNotificationButton" type="button" title="测试系统提醒"><span aria-hidden="true">◉</span><span>测试提醒</span></button>
+              <button class="icon-button task-toolbar-button notification-settings-button" id="notificationSettingsButton" type="button" title="打开系统通知设置"><span aria-hidden="true">⚙</span><span>通知设置</span></button>
+              <button class="icon-button task-toolbar-button" id="clearDoneButton" type="button" title="清除已完成"><span aria-hidden="true">⌫</span><span>清除完成</span></button>
             </div>
           </div>
 
@@ -293,7 +293,8 @@
           <div class="memo-toolbar">
             <input id="memoSearch" type="search" placeholder="搜索标题、分类、内容" autocomplete="off" />
           </div>
-          <div class="memo-tags" id="memoTags"></div>
+          <div class="memo-tags" id="memoTags" aria-label="备忘分类，可横向滚动"></div>
+          <p class="memo-tags-hint">左右滑动查看全部分类</p>
           <div class="memo-list" id="memoList"></div>
         </section>
       </section>
@@ -415,7 +416,7 @@
       </section>
 
       <section class="app-view" id="habitView" data-view="habits" aria-label="习惯与今日打卡">
-        <section class="panel habit-panel">
+        <section class="panel habit-panel" id="habitPanel">
           <div class="panel-header">
             <div>
               <p class="eyebrow">Habits</p>
@@ -423,7 +424,13 @@
             </div>
             <button class="small-add-button" id="habitAddButton" type="button" aria-label="新增习惯">+</button>
           </div>
-          <section class="habit-stats-card habit-today-card" aria-labelledby="habitTodayHeading">
+          <section class="habit-onboarding" id="habitOnboarding" hidden>
+            <span aria-hidden="true">○</span>
+            <strong>从一个小习惯开始</strong>
+            <p>创建习惯后，这里会显示打卡、连续天数、趋势和热力图。</p>
+            <button type="button" id="habitOnboardingButton">创建第一个习惯</button>
+          </section>
+          <section class="habit-stats-card habit-today-card" data-habit-content aria-labelledby="habitTodayHeading">
             <div class="habit-stats-heading">
               <div><span class="habit-section-label">Today</span><h3 id="habitTodayHeading">今日完成率</h3></div>
               <label class="habit-stats-filter">统计范围
@@ -438,8 +445,8 @@
             </div>
             <progress id="habitTodayProgress" max="100" value="0" aria-label="今日习惯完成率"></progress>
           </section>
-          <div class="habit-week-strip" id="habitWeekStrip" aria-label="选择打卡日期"></div>
-          <section class="habit-stats-card habit-week-card" aria-labelledby="habitWeekHeading">
+          <div class="habit-week-strip" id="habitWeekStrip" data-habit-content aria-label="选择打卡日期"></div>
+          <section class="habit-stats-card habit-week-card" data-habit-content aria-labelledby="habitWeekHeading">
             <div class="habit-stats-heading">
               <div><span class="habit-section-label">This week</span><h3 id="habitWeekHeading">本周完成概览</h3></div>
               <strong id="habitWeekRate">—</strong>
@@ -447,15 +454,15 @@
             <p id="habitWeekDetail">本周没有应打卡习惯</p>
             <div class="habit-week-overview" id="habitWeekOverview" aria-label="本周每日习惯完成率"></div>
           </section>
-          <section class="habit-streak-grid" aria-label="连续打卡统计">
+          <section class="habit-streak-grid" data-habit-content aria-label="连续打卡统计">
             <article><span>当前连续天数</span><strong id="habitCurrentStreak">0</strong><small>个应打卡日</small></article>
             <article><span>最长连续天数</span><strong id="habitLongestStreak">0</strong><small>个应打卡日</small></article>
           </section>
-          <section class="habit-stats-card habit-trend-card" aria-labelledby="habitTrendHeading">
+          <section class="habit-stats-card habit-trend-card" data-habit-content aria-labelledby="habitTrendHeading">
             <div class="habit-stats-heading"><div><span class="habit-section-label">14 days</span><h3 id="habitTrendHeading">完成率趋势</h3></div></div>
             <div class="habit-trend-chart" id="habitTrendChart" aria-label="最近十四天习惯完成率趋势"></div>
           </section>
-          <section class="habit-stats-card habit-heatmap-card" aria-labelledby="habitHeatmapHeading">
+          <section class="habit-stats-card habit-heatmap-card" data-habit-content aria-labelledby="habitHeatmapHeading">
             <div class="habit-stats-heading">
               <div><span class="habit-section-label">90 days</span><h3 id="habitHeatmapHeading">习惯完成热力图</h3></div>
               <span class="habit-heatmap-range" id="habitHeatmapRange"></span>
@@ -465,7 +472,7 @@
             </div>
             <div class="habit-heatmap-legend" aria-label="完成率图例"><span>低</span><i class="level-0"></i><i class="level-1"></i><i class="level-2"></i><i class="level-3"></i><i class="level-4"></i><span>高</span><i class="is-empty"></i><span>无安排</span></div>
           </section>
-          <section class="habit-checkin-section" aria-labelledby="habitSelectedDate">
+          <section class="habit-checkin-section" data-habit-content aria-labelledby="habitSelectedDate">
             <div class="habit-day-summary">
               <div><strong id="habitSelectedDate">今天</strong><span id="habitCompletionText">0 / 0 完成</span></div>
               <progress id="habitCompletionProgress" max="100" value="0" aria-label="所选日期习惯完成率"></progress>
