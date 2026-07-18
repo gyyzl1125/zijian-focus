@@ -23,6 +23,7 @@
     "test:source-navigation": "node --test tests/source-navigation.test.cjs",
     "test:profile-page": "node --test tests/profile-page.test.cjs",
     "test:profile-name": "node --test tests/profile-name.test.cjs",
+    "test:focus-mobile-layout": "node --test tests/focus-mobile-layout.test.cjs",
     "test:habits": "node --test tests/habits.test.cjs",
     "test:habit-sync": "node --test tests/habit-sync.test.cjs",
     "test:habit-dom": "node --test tests/habit-dom.test.cjs",
