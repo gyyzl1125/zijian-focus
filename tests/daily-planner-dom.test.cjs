@@ -92,8 +92,8 @@ function createHarness({ state, planner = DailyPlanner } = {}) {
 }
 
 test("index loads daily-planner.js before app.js", () => {
-  const plannerIndex = indexSource.indexOf("daily-planner.js?v=58");
-  const appIndex = indexSource.indexOf("app.js?v=58");
+  const plannerIndex = indexSource.indexOf("daily-planner.js?v=59");
+  const appIndex = indexSource.indexOf("app.js?v=59");
   assert.ok(plannerIndex >= 0 && appIndex > plannerIndex);
   assert.match(indexSource, /本地智能编排/);
   assert.match(appSource, /dailyPlanGenerateButton\.addEventListener\("click", \(\) => generateDailyPlanPreview\(Date\.now\(\)\)\)/);

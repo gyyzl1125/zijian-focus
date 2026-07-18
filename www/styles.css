@@ -6065,3 +6065,37 @@ body {
     font-size: max(0.68rem, 11px);
   }
 }
+
+/* v59: the focus screen owns its mobile scroll area above the fixed navigation. */
+@media (max-width: 560px) {
+  body[data-view="focus"] .app-shell {
+    grid-template-rows: auto minmax(0, 1fr);
+    height: 100dvh;
+    min-height: 100dvh;
+    padding-bottom: 0;
+    box-sizing: border-box;
+    overflow: hidden;
+  }
+
+  .app-view[data-view="focus"].is-active {
+    height: 100%;
+    min-height: 0;
+    padding-bottom: calc(88px + env(safe-area-inset-bottom));
+    scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom));
+    box-sizing: border-box;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  #focusView .timer-panel {
+    height: auto;
+    min-height: calc(100dvh - 134px);
+    margin-bottom: 0;
+  }
+
+  #focusView .timer-content {
+    overflow: visible;
+  }
+}
