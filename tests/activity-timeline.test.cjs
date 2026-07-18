@@ -67,6 +67,7 @@ function createHarness({ state = baseState(), selectedDay = MONDAY, confirmation
   const document = new DOMParser().parseFromString(indexSource, "text/html");
   let saveCalls = 0;
   const toasts = [];
+  const activeViews = [];
   const confirmationCalls = [];
   const idQueue = ids.slice();
   const context = {
@@ -100,6 +101,7 @@ function createHarness({ state = baseState(), selectedDay = MONDAY, confirmation
     },
     saveState() { saveCalls += 1; state.syncUpdatedAt += 1; },
     showReminderToast(title, body) { toasts.push({ title, body }); },
+    setActiveView(viewName) { activeViews.push(viewName); },
     dateKey(value = new Date()) {
       const date = value instanceof Date ? value : new Date(value);
       return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -112,6 +114,19 @@ function createHarness({ state = baseState(), selectedDay = MONDAY, confirmation
       return start;
     },
     getTaskColor() { return { bg: "#eee", border: "#aaa", ink: "#111" }; },
+    getHabitFocusMinutes(habit) {
+      const entry = state.habitEntries.find((item) => item.habitId === habit.id && item.dayKey === selectedDay);
+      const remaining = Math.max(0, Number(habit.targetValue) - Number(entry?.value || 0));
+      return remaining === 0 ? 0 : Math.max(1, Math.min(Number(state.selectedMinutes) || 25, remaining));
+    },
+    beginFocusTimer(minutes, now) {
+      state.selectedMinutes = Number(minutes) || 25;
+      state.timerTotalSeconds = state.selectedMinutes * 60;
+      state.timerSecondsLeft = state.timerTotalSeconds;
+      state.isRunning = true;
+      state.startedAt = now;
+      state.endsAt = now + state.timerTotalSeconds * 1000;
+    },
     formatClock(timestamp) {
       const value = new Date(timestamp);
       return `${String(value.getHours()).padStart(2, "0")}:${String(value.getMinutes()).padStart(2, "0")}`;
@@ -129,7 +144,7 @@ function createHarness({ state = baseState(), selectedDay = MONDAY, confirmation
   };`, context);
   return {
     context, state, document, els: context.els, api: context.api,
-    toasts, confirmationCalls,
+    toasts, confirmationCalls, activeViews,
     get saveCalls() { return saveCalls; },
   };
 }
@@ -172,6 +187,9 @@ test("starting records one running session, saves once, and leaves task and stat
   assert.equal(harness.saveCalls, 1);
   assert.equal(state.activitySessions[0].status, "running");
   assert.equal(state.activeActivitySessionId, "activity-new");
+  assert.equal(state.isRunning, true);
+  assert.equal(state.timerSecondsLeft, 25 * 60);
+  assert.deepEqual(harness.activeViews, ["focus"]);
   assert.equal(state.tasks[0].done, false);
   assert.deepEqual(plain({
     tasks: state.tasks, focusSessions: state.focusSessions, focusByDate: state.focusByDate,
@@ -294,13 +312,26 @@ test("tasks, courses, focus sessions and plans never appear as actual records", 
   assert.equal(harness.saveCalls, 0);
 });
 
+test("a linked activity and focus session render as one actual timeline item", () => {
+  const linked = session("activity", "task-1", "写报告", at(MONDAY, 9), at(MONDAY, 9, 25), { focusSessionId: "focus-1" });
+  const state = baseState({
+    tasks: [task("task-1", "写报告")],
+    activitySessions: [linked],
+    focusSessions: [{ id: "focus-1", activitySessionId: "activity", title: "写报告", startAt: at(MONDAY, 9), endAt: at(MONDAY, 9, 25), minutes: 25 }],
+  });
+  const harness = createHarness({ state });
+  harness.api.render(at(MONDAY, 12));
+  assert.equal(harness.els.timelineList.querySelectorAll(".timeline-item").length, 1);
+  assert.equal(harness.els.timelineStats.textContent.includes("1"), true);
+});
+
 test("mobile activity controls avoid horizontal overflow", () => {
   assert.match(stylesSource, /\.timeline-start-row \{[\s\S]*?grid-template-columns: auto minmax\(0, 1fr\) auto;/);
   assert.match(stylesSource, /@media[\s\S]*?\.timeline-start-row \{[\s\S]*?grid-template-columns: 1fr auto;/);
   assert.match(stylesSource, /\.timeline-running-card \{[\s\S]*?min-width: 0;/);
 });
 
-test("timeline offers duration and count habits but keeps boolean habits manual", () => {
+test("timeline offers duration habits while count and boolean habits stay manual", () => {
   const habits = [
     { id: "read", title: "阅读", color: "sage", metricType: "duration", targetValue: 60, unit: "分钟", daysOfWeek: [1], includeInPlanner: true, createdAt: at(MONDAY, 0), updatedAt: at(MONDAY, 0), archivedAt: null },
     { id: "water", title: "喝水", color: "sky", metricType: "count", targetValue: 8, unit: "次", daysOfWeek: [1], includeInPlanner: false, createdAt: at(MONDAY, 0), updatedAt: at(MONDAY, 0), archivedAt: null },
@@ -310,8 +341,39 @@ test("timeline offers duration and count habits but keeps boolean habits manual"
   harness.api.render(at(MONDAY, 9));
   const values = [...harness.els.timelineTaskSelect.options].map((option) => option.value);
   assert.ok(values.includes("habit:read"));
-  assert.ok(values.includes("habit:water"));
+  assert.ok(!values.includes("habit:water"));
   assert.ok(!values.includes("habit:sleep"));
+});
+
+test("duration habit auto-focus never exceeds today's remaining target", () => {
+  const read = { id: "read", title: "阅读", color: "sage", metricType: "duration", targetValue: 60, unit: "分钟", daysOfWeek: [1], includeInPlanner: true, createdAt: at(MONDAY, 0), updatedAt: at(MONDAY, 0), archivedAt: null };
+  const state = baseState({
+    selectedMinutes: 25,
+    habits: [read],
+    habitEntries: [{ id: `read::${MONDAY}`, habitId: "read", dayKey: MONDAY, value: 50, manualValue: 50, createdAt: at(MONDAY, 0), updatedAt: at(MONDAY, 8) }],
+  });
+  const harness = createHarness({ state, ids: ["habit-run"] });
+  harness.api.render(at(MONDAY, 9));
+  selectTask(harness, "habit:read");
+  assert.equal(harness.api.start(at(MONDAY, 9)), true);
+  assert.equal(state.selectedMinutes, 10);
+  assert.equal(state.timerSecondsLeft, 10 * 60);
+});
+
+test("an already completed duration habit does not start a timer beyond its remaining target", () => {
+  const read = { id: "read", title: "阅读", color: "sage", metricType: "duration", targetValue: 60, unit: "分钟", daysOfWeek: [1], includeInPlanner: true, createdAt: at(MONDAY, 0), updatedAt: at(MONDAY, 0), archivedAt: null };
+  const state = baseState({
+    habits: [read],
+    habitEntries: [{ id: `read::${MONDAY}`, habitId: "read", dayKey: MONDAY, value: 60, manualValue: 60, createdAt: at(MONDAY, 0), updatedAt: at(MONDAY, 8) }],
+  });
+  const harness = createHarness({ state });
+  harness.api.render(at(MONDAY, 9));
+  selectTask(harness, "habit:read");
+  assert.ok(!harness.api.start(at(MONDAY, 9)));
+  assert.equal(state.activitySessions.length, 0);
+  assert.equal(Boolean(state.isRunning), false);
+  assert.equal(harness.saveCalls, 0);
+  assert.equal(harness.toasts.at(-1)?.title, "今日目标已达成");
 });
 
 test("ending a duration habit updates its daily entry without touching task or focus data", () => {
@@ -323,6 +385,7 @@ test("ending a duration habit updates its daily entry without touching task or f
   selectTask(harness, "habit:read");
   assert.equal(harness.api.start(at(MONDAY, 9)), true);
   assert.equal(state.activitySessions[0].habitId, "read");
+  assert.equal(state.selectedMinutes, 25);
   assert.equal(harness.api.end(at(MONDAY, 9, 25)), true);
   assert.equal(state.habitEntries[0].value, 25);
   assert.match(harness.els.timelineList.textContent, /阅读/);

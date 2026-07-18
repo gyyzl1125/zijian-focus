@@ -18,6 +18,7 @@
     "test:activity-sessions": "node --test tests/activity-sessions.test.cjs",
     "test:activity-sync": "node --test tests/activity-sync.test.cjs",
     "test:activity-timeline": "node --test tests/activity-timeline.test.cjs",
+    "test:activity-focus-link": "node --test tests/activity-focus-link.test.cjs",
     "test:habits": "node --test tests/habits.test.cjs",
     "test:habit-sync": "node --test tests/habit-sync.test.cjs",
     "test:habit-dom": "node --test tests/habit-dom.test.cjs",

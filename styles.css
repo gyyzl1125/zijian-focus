@@ -552,6 +552,30 @@ textarea:focus-visible {
   align-items: center;
 }
 
+.focus-context {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface) 88%, var(--soft));
+  min-width: 0;
+}
+
+.focus-context[hidden] { display: none; }
+
+.focus-context strong,
+.focus-context span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.focus-context span {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
 .hero {
   justify-content: space-between;
   gap: 16px;

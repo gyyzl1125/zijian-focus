@@ -112,7 +112,11 @@
           </div>
 
           <div class="timer-content">
-            <div class="timer-dial" id="timerDial" role="slider" aria-label="选择专注时长" aria-valuemin="5" aria-valuemax="180" aria-valuenow="25" tabindex="0" hidden>
+            <div class="focus-context" id="focusContext" hidden aria-live="polite">
+              <strong id="focusContextTitle">自由专注</strong>
+              <span id="focusContextProgress"></span>
+            </div>
+            <div class="timer-dial" id="timerDial" role="slider" aria-label="选择专注时长" aria-valuemin="1" aria-valuemax="180" aria-valuenow="25" tabindex="0" hidden>
               <div class="dial-face">
                 <span class="dial-knob" id="dialKnob"></span>
                 <span class="dial-label">专注时长</span>
@@ -122,8 +126,8 @@
             </div>
 
             <label class="range-row">
-              <span>5</span>
-              <input id="minuteRange" type="range" min="5" max="180" step="5" value="25" />
+              <span>1</span>
+              <input id="minuteRange" type="range" min="1" max="180" step="1" value="25" />
               <span>180</span>
             </label>
 
@@ -136,6 +140,7 @@
             </div>
             <div class="timer-actions">
               <button class="primary-button" id="startPauseButton">开始</button>
+              <button class="ghost-button" id="finishFocusButton" type="button" hidden>提前结束</button>
               <button class="fast-finish-button" id="fastFinishButton" type="button">火苗完成 -5</button>
               <button class="ghost-button" id="resetButton">重置</button>
             </div>

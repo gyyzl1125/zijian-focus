@@ -134,6 +134,27 @@ test("equal revisions never let running overwrite a terminal activity", () => {
   assert.equal(merged.activeActivitySessionId, null);
 });
 
+test("a linked completed activity keeps its focus session when merged with stale running state", () => {
+  const api = createSyncApi();
+  const live = running("linked", { updatedAt: START });
+  const done = {
+    ...live,
+    status: "completed",
+    endAt: START + 25 * 60_000,
+    minutes: 25,
+    endReason: "manual",
+    focusSessionId: "focus-linked",
+    updatedAt: START + 25 * 60_000,
+  };
+  const merged = api.mergeSyncedStates(
+    baseState({ activitySessions: [live], activeActivitySessionId: "linked" }),
+    baseState({ activitySessions: [done], activeActivitySessionId: null })
+  );
+  assert.equal(merged.activitySessions[0].status, "completed");
+  assert.equal(merged.activitySessions[0].focusSessionId, "focus-linked");
+  assert.equal(merged.activeActivitySessionId, null);
+});
+
 test("cloudSafeState retains normalized activities and the repaired active id", () => {
   const state = baseState({
     activitySessions: [running()], activeActivitySessionId: "missing",
