@@ -110,6 +110,7 @@ const defaultState = {
   transactions: [],
   monthlyBudget: 0,
   dailyPlans: {},
+  profileName: "自见用户",
   deletions: { version: 1, tasks: {}, memos: {} },
 };
 
@@ -153,7 +154,11 @@ const els = {
   timeDisplay: document.querySelector("#timeDisplay"),
   progressBar: document.querySelector("#progressBar"),
   timerNote: document.querySelector("#timerNote"),
+  focusContext: document.querySelector("#focusContext"),
+  focusContextTitle: document.querySelector("#focusContextTitle"),
+  focusContextProgress: document.querySelector("#focusContextProgress"),
   startPauseButton: document.querySelector("#startPauseButton"),
+  finishFocusButton: document.querySelector("#finishFocusButton"),
   resetButton: document.querySelector("#resetButton"),
   fastFinishButton: document.querySelector("#fastFinishButton"),
   chipButtons: [...document.querySelectorAll(".chip-button")],
@@ -226,6 +231,7 @@ const els = {
   streakHint: document.querySelector("#streakHint"),
   views: [...document.querySelectorAll(".app-view")],
   navButtons: [...document.querySelectorAll(".nav-button, [data-view-target]")],
+  sourceBackButton: document.querySelector("#sourceBackButton"),
   weekStrip: document.querySelector("#weekStrip"),
   timelineDateTitle: document.querySelector("#timelineDateTitle"),
   timelineStats: document.querySelector("#timelineStats"),
@@ -347,6 +353,22 @@ const els = {
   deadlineSprintAdoptButton: document.querySelector("#deadlineSprintAdoptButton"),
   deadlineSprintAdoptionMessage: document.querySelector("#deadlineSprintAdoptionMessage"),
   profileFlames: document.querySelector("#profileFlames"),
+  profileAvatar: document.querySelector("#profileAvatar"),
+  profileNameText: document.querySelector("#profileNameText"),
+  profileNameEditButton: document.querySelector("#profileNameEditButton"),
+  profileNameForm: document.querySelector("#profileNameForm"),
+  profileNameInput: document.querySelector("#profileNameInput"),
+  profileNameCancelButton: document.querySelector("#profileNameCancelButton"),
+  profileTodayFocus: document.querySelector("#profileTodayFocus"),
+  profileHabitRate: document.querySelector("#profileHabitRate"),
+  profileStreakDays: document.querySelector("#profileStreakDays"),
+  profileEncouragement: document.querySelector("#profileEncouragement"),
+  profileWeekFocus: document.querySelector("#profileWeekFocus"),
+  profileWeekHabit: document.querySelector("#profileWeekHabit"),
+  profileWeekHabitDetail: document.querySelector("#profileWeekHabitDetail"),
+  profileWeekActivity: document.querySelector("#profileWeekActivity"),
+  profileWeekActivityDetail: document.querySelector("#profileWeekActivityDetail"),
+  profileAboutButton: document.querySelector("#profileAboutButton"),
   usagePermissionCard: document.querySelector("#usagePermissionCard"),
   usagePermissionButton: document.querySelector("#usagePermissionButton"),
   usageRefreshButton: document.querySelector("#usageRefreshButton"),
@@ -417,6 +439,11 @@ const els = {
 };
 
 let activeView = "home";
+const PROFILE_RETURN_DESTINATIONS = new Set(["timeline", "week", "ddl", "planner", "tasks", "habits"]);
+let navigationSource = null;
+let navigationDestination = null;
+let profileScrollTop = 0;
+let profileHistoryArmed = false;
 let selectedTimelineDate = dateKey();
 let selectedWeekDate = dateKey();
 let weekShiftInProgress = false;
@@ -528,6 +555,15 @@ function filterDeletedEntities(items, deletionMap) {
   });
 }
 
+function normalizeProfileName(value) {
+  const normalized = String(value ?? "")
+    .replace(/[\u0000-\u001f\u007f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 32);
+  return normalized || "自见用户";
+}
+
 function normalizeState() {
   const activityApi = globalThis.ActivitySessions;
   if (activityApi?.normalizeActivitySessions && activityApi?.repairActiveActivitySessionId) {
@@ -609,7 +645,53 @@ function normalizeState() {
     state.financeRulesVersion = 4;
   }
   state.monthlyBudget = Math.max(0, Number(state.monthlyBudget || 0));
+  state.profileName = normalizeProfileName(state.profileName);
   state.syncUpdatedAt = Math.max(0, Number(state.syncUpdatedAt || 0));
+}
+
+function completeActivityForFocusState(nextState, focusSession, finishedAt) {
+  const activityApi = globalThis.ActivitySessions;
+  if (!activityApi?.getRunningActivitySession || !activityApi?.completeActivitySession) return nextState;
+  let sessions = activityApi.normalizeActivitySessions(nextState.activitySessions, finishedAt);
+  let activeId = activityApi.repairActiveActivitySessionId(sessions, nextState.activeActivitySessionId);
+  let running = activityApi.getRunningActivitySession(sessions, activeId);
+  if (!running && activityApi.startFreeFocusActivity) {
+    const started = activityApi.startFreeFocusActivity({
+      sessions,
+      activeActivitySessionId: null,
+      now: focusSession.startAt,
+      title: "自由专注",
+      idFactory: () => focusSession.activitySessionId || crypto.randomUUID(),
+    });
+    if (started.ok) {
+      sessions = started.sessions;
+      activeId = started.activeActivitySessionId;
+      running = started.session;
+    }
+  }
+  if (!running) return nextState;
+  const completed = activityApi.completeActivitySession({
+    sessions,
+    activeActivitySessionId: activeId,
+    now: finishedAt,
+    focusSessionId: focusSession.id,
+  });
+  if (!completed.ok) return nextState;
+  const habitApi = globalThis.Habits;
+  const habitEntries = habitApi?.reconcileHabitEntriesFromSessions
+    ? habitApi.reconcileHabitEntriesFromSessions(
+      nextState.habits,
+      nextState.habitEntries,
+      completed.sessions,
+      finishedAt
+    )
+    : nextState.habitEntries;
+  return {
+    ...nextState,
+    activitySessions: completed.sessions,
+    activeActivitySessionId: null,
+    habitEntries,
+  };
 }
 
 function restoreTimerState(nextState) {
@@ -627,7 +709,24 @@ function restoreTimerState(nextState) {
   const finishedAt = Number(nextState.endsAt) || Date.now();
   const startedAt = finishedAt - (nextState.timerTotalSeconds || minutes * MINUTE) * 1000;
   const finishedDate = dateKey(new Date(finishedAt));
-  return {
+  const activityApi = globalThis.ActivitySessions;
+  const running = activityApi?.getRunningActivitySession?.(
+    nextState.activitySessions,
+    nextState.activeActivitySessionId
+  );
+  const focusSessionId = crypto.randomUUID();
+  const activitySessionId = running?.id || crypto.randomUUID();
+  const focusSession = {
+    id: focusSessionId,
+    activitySessionId,
+    taskId: running?.taskId || null,
+    habitId: running?.habitId || null,
+    title: String(running?.title || "自由专注"),
+    startAt: running?.startAt || startedAt,
+    endAt: finishedAt,
+    minutes,
+  };
+  const restored = {
     ...nextState,
     isRunning: false,
     startedAt: null,
@@ -645,15 +744,10 @@ function restoreTimerState(nextState) {
     },
     focusSessions: [
       ...(nextState.focusSessions || []),
-      {
-        id: crypto.randomUUID(),
-        title: "专注",
-        startAt: startedAt,
-        endAt: finishedAt,
-        minutes,
-      },
+      focusSession,
     ],
   };
+  return completeActivityForFocusState(restored, focusSession, finishedAt);
 }
 
 function migrateTasks(tasks) {
@@ -1259,13 +1353,67 @@ function setMinutesFromPointer(event) {
   setTimerMinutes(angleToMinutes(Math.atan2(dy, dx) * 180 / Math.PI + 90));
 }
 
-function startTimer() {
+function getCurrentFocusActivity() {
+  return globalThis.ActivitySessions?.getRunningActivitySession?.(
+    state.activitySessions,
+    state.activeActivitySessionId
+  ) || null;
+}
+
+function getHabitFocusMinutes(habit, now = Date.now()) {
+  if (!habit || habit.metricType !== "duration") return state.selectedMinutes;
+  const key = dateKey(new Date(now));
+  const entry = (state.habitEntries || []).find((item) => item?.habitId === habit.id && item.dayKey === key);
+  const remaining = Math.max(0, Math.ceil(Number(habit.targetValue || 0) - Number(entry?.value || 0)));
+  if (remaining === 0) return 0;
+  return Math.max(1, Math.min(MAX_MINUTES, Number(state.selectedMinutes) || 25, remaining));
+}
+
+function beginFocusTimer(minutes, now = Date.now()) {
+  const selected = Math.max(1, Math.min(MAX_MINUTES, Math.round(Number(minutes) || 25)));
+  state.selectedMinutes = selected;
+  state.timerTotalSeconds = selected * MINUTE;
+  state.timerSecondsLeft = state.timerTotalSeconds;
   state.isRunning = true;
-  state.startedAt = Date.now();
-  state.endsAt = Date.now() + state.timerSecondsLeft * 1000;
+  state.startedAt = now;
+  state.endsAt = now + state.timerSecondsLeft * 1000;
+  if (typeof window !== "undefined" && typeof tick === "function") {
+    window.clearInterval(tickHandle);
+    tickHandle = window.setInterval(tick, 1000);
+  }
+}
+
+function ensureFreeFocusActivity(now = Date.now()) {
+  const activityApi = globalThis.ActivitySessions;
+  const running = getCurrentFocusActivity();
+  if (running || !activityApi?.startFreeFocusActivity) return running;
+  const started = activityApi.startFreeFocusActivity({
+    sessions: state.activitySessions,
+    activeActivitySessionId: state.activeActivitySessionId,
+    now,
+    title: "自由专注",
+    idFactory: () => crypto.randomUUID(),
+  });
+  if (!started.ok) return null;
+  state.activitySessions = started.sessions;
+  state.activeActivitySessionId = started.activeActivitySessionId;
+  return started.session;
+}
+
+function startTimer(now = Date.now()) {
+  ensureFreeFocusActivity(now);
+  if (!getCurrentFocusActivity()) {
+    showReminderToast("无法开始专注", "实际活动记录没有创建，请稍后重试。");
+    return false;
+  }
+  state.isRunning = true;
+  state.startedAt = now;
+  state.endsAt = now + state.timerSecondsLeft * 1000;
+  window.clearInterval(tickHandle);
   tickHandle = window.setInterval(tick, 1000);
   saveState();
   render();
+  return true;
 }
 
 function pauseTimer() {
@@ -1282,7 +1430,30 @@ function pauseTimer() {
 }
 
 function resetTimer() {
-  pauseTimer();
+  const now = Date.now();
+  const activityApi = globalThis.ActivitySessions;
+  const cancelled = activityApi?.cancelActivitySession?.({
+    sessions: state.activitySessions,
+    activeActivitySessionId: state.activeActivitySessionId,
+    now,
+  });
+  if (cancelled?.ok) {
+    state.activitySessions = cancelled.sessions;
+    state.activeActivitySessionId = null;
+    if (globalThis.Habits?.reconcileHabitEntriesFromSessions) {
+      state.habitEntries = globalThis.Habits.reconcileHabitEntriesFromSessions(
+        state.habits,
+        state.habitEntries,
+        state.activitySessions,
+        now
+      );
+    }
+  }
+  state.isRunning = false;
+  state.startedAt = null;
+  state.endsAt = null;
+  window.clearInterval(tickHandle);
+  tickHandle = null;
   state.timerTotalSeconds = state.selectedMinutes * MINUTE;
   state.timerSecondsLeft = state.timerTotalSeconds;
   saveState();
@@ -1290,19 +1461,45 @@ function resetTimer() {
 }
 
 function completeFocusSession(options = {}) {
-  const minutes = options.minutes || Math.round(state.timerTotalSeconds / MINUTE);
-  const today = dateKey();
-  const finishedAt = Date.now();
-  const startedAt = options.startedAt || finishedAt - minutes * MINUTE * 1000;
+  const activityApi = globalThis.ActivitySessions;
+  const finishedAt = Number(options.finishedAt) || Date.now();
+  const running = getCurrentFocusActivity();
+  if (!running || !activityApi?.completeActivitySession) return false;
+  const existingFocus = (state.focusSessions || []).find((session) => session?.activitySessionId === running.id);
+  if (existingFocus || running.focusSessionId) return false;
+  const focusSessionId = crypto.randomUUID();
+  const completed = activityApi.completeActivitySession({
+    sessions: state.activitySessions,
+    activeActivitySessionId: state.activeActivitySessionId,
+    now: finishedAt,
+    focusSessionId,
+  });
+  if (!completed.ok) return false;
+  const minutes = completed.session.minutes;
+  const today = dateKey(new Date(finishedAt));
   const earned = options.skipReward ? 0 : getFlameReward(minutes);
-  state.focusByDate[today] = (state.focusByDate[today] || 0) + minutes;
-  state.focusSessions.push({
-    id: crypto.randomUUID(),
-    title: "专注",
-    startAt: startedAt,
+  const focusSession = {
+    id: focusSessionId,
+    activitySessionId: completed.session.id,
+    taskId: completed.session.taskId || null,
+    habitId: completed.session.habitId || null,
+    title: String(completed.session.title || "自由专注"),
+    startAt: completed.session.startAt,
     endAt: finishedAt,
     minutes,
-  });
+  };
+  state.activitySessions = completed.sessions;
+  state.activeActivitySessionId = null;
+  state.focusByDate[today] = (state.focusByDate[today] || 0) + minutes;
+  state.focusSessions.push(focusSession);
+  if (globalThis.Habits?.reconcileHabitEntriesFromSessions) {
+    state.habitEntries = globalThis.Habits.reconcileHabitEntriesFromSessions(
+      state.habits,
+      state.habitEntries,
+      state.activitySessions,
+      finishedAt
+    );
+  }
   if (earned > 0) addFlameLedger("earn", earned, "专注完成", finishedAt);
   state.isRunning = false;
   state.startedAt = null;
@@ -1313,10 +1510,28 @@ function completeFocusSession(options = {}) {
   tickHandle = null;
   saveState();
   render();
-  els.timerNote.textContent = earned > 0
-    ? `完成 ${minutes} 分钟专注，获得 ${earned} 个火苗。`
-    : `完成 ${minutes} 分钟专注，小鸡长成了。`;
+  const habit = completed.session.habitId
+    ? (state.habits || []).find((item) => item?.id === completed.session.habitId)
+    : null;
+  const habitEntry = habit
+    ? (state.habitEntries || []).find((item) => item?.habitId === habit.id && item.dayKey === today)
+    : null;
+  const habitReached = habit?.metricType === "duration" && Number(habitEntry?.value || 0) >= Number(habit.targetValue || 0);
+  const encouragementTitle = habitReached ? "习惯达标" : options.earlyEnd ? "已提前结束" : "专注完成";
+  const encouragementBody = habitReached
+    ? `${habit.title} 今日已完成 ${habitEntry.value}/${habit.targetValue} ${habit.unit || "分钟"}。`
+    : options.earlyEnd
+      ? `已按实际时长记录 ${minutes} 分钟，稍后可以再次开始。`
+      : `完成 ${minutes} 分钟专注${earned > 0 ? `，获得 ${earned} 个火苗` : ""}。`;
+  els.timerNote.textContent = encouragementBody;
+  showReminderToast(encouragementTitle, encouragementBody);
   showCompletionSheet(minutes, earned);
+  return true;
+}
+
+function finishFocusEarly(now = Date.now()) {
+  if (!getCurrentFocusActivity()) return false;
+  return completeFocusSession({ finishedAt: now, earlyEnd: true });
 }
 
 function fastFinishSession() {
@@ -1325,8 +1540,7 @@ function fastFinishSession() {
     return;
   }
   addFlameLedger("spend", FAST_FINISH_COST, "快速完成");
-  const minutes = Math.max(1, Math.round(state.timerTotalSeconds / MINUTE));
-  completeFocusSession({ minutes, skipReward: true });
+  completeFocusSession({ finishedAt: Date.now(), earlyEnd: true, skipReward: true });
   showReminderToast("已快速完成", `消耗 ${FAST_FINISH_COST} 个火苗完成本轮专注。`);
 }
 
@@ -1943,6 +2157,26 @@ function getStreak() {
   return streak;
 }
 
+function renderFocusContext() {
+  if (!els.focusContext) return;
+  const activity = getCurrentFocusActivity();
+  els.focusContext.hidden = !activity;
+  if (els.finishFocusButton) els.finishFocusButton.hidden = !activity;
+  if (!activity) return;
+  els.focusContextTitle.textContent = String(activity.title || "自由专注");
+  const today = dateKey();
+  if (activity.type === "habit") {
+    const habit = (state.habits || []).find((item) => item?.id === activity.habitId);
+    const entry = (state.habitEntries || []).find((item) => item?.habitId === activity.habitId && item.dayKey === today);
+    const value = Math.max(0, Number(entry?.value) || 0);
+    const target = Math.max(1, Number(habit?.targetValue) || 1);
+    els.focusContextProgress.textContent = `今日已完成 ${value}/${target} ${habit?.unit || "分钟"} · 本轮目标 ${state.selectedMinutes} 分钟`;
+    return;
+  }
+  const todayMinutes = Math.max(0, Number(state.focusByDate?.[today]) || 0);
+  els.focusContextProgress.textContent = `今日已专注 ${todayMinutes} 分钟 · 本轮目标 ${state.selectedMinutes} 分钟`;
+}
+
 function renderTimer() {
   const elapsed = state.timerTotalSeconds - state.timerSecondsLeft;
   const progress = Math.min(100, Math.max(0, elapsed / state.timerTotalSeconds * 100));
@@ -1967,6 +2201,7 @@ function renderTimer() {
   els.dialKnob.style.transform = `rotate(${angle}deg) translateY(-${knobRadius}px)`;
   els.timerDial.setAttribute("aria-valuenow", state.selectedMinutes);
   els.fastFinishButton.disabled = (state.flames || 0) < FAST_FINISH_COST;
+  renderFocusContext();
 
   if (state.isRunning) {
     els.timerNote.textContent = progress > 70 ? "快完成了，小鸡已经长成，草地也热闹起来。" : "专注中，小鸡会从破壳慢慢长大。";
@@ -2086,7 +2321,7 @@ function renderTimelineTaskPicker() {
       || String(left.title || "").localeCompare(String(right.title || ""))
       || String(left.id).localeCompare(String(right.id)));
   const habits = globalThis.Habits?.normalizeHabits?.(state.habits, Date.now())
-    ?.filter((habit) => habit.archivedAt === null && ["duration", "count"].includes(habit.metricType))
+    ?.filter((habit) => habit.archivedAt === null && habit.metricType === "duration")
     .sort((left, right) => String(left.title || "").localeCompare(String(right.title || "")) || String(left.id).localeCompare(String(right.id))) || [];
   els.timelineTaskSelect.replaceChildren();
   const placeholder = document.createElement("option");
@@ -2127,12 +2362,20 @@ function renderRunningActivity(now = Date.now()) {
   els.timelineRunningElapsed.textContent = `已持续 ${formatActivityElapsed(Number(now) - running.startAt)}`;
 }
 
-function applyActivityUiResult(result, successTitle, successBody) {
+function applyActivityUiResult(result, successTitle, successBody, options = {}) {
   if (!result?.ok || !result.changed) return false;
   const previousSessions = state.activitySessions;
   const previousActiveId = state.activeActivitySessionId;
   const previousHabitEntries = state.habitEntries;
   const previousSyncUpdatedAt = state.syncUpdatedAt;
+  const previousTimer = {
+    selectedMinutes: state.selectedMinutes,
+    timerSecondsLeft: state.timerSecondsLeft,
+    timerTotalSeconds: state.timerTotalSeconds,
+    isRunning: state.isRunning,
+    startedAt: state.startedAt,
+    endsAt: state.endsAt,
+  };
   try {
     state.activitySessions = result.sessions;
     state.activeActivitySessionId = result.activeActivitySessionId;
@@ -2145,10 +2388,13 @@ function applyActivityUiResult(result, successTitle, successBody) {
         Math.max(...state.activitySessions.map((session) => Number(session.updatedAt) || 0), 0)
       );
     }
+    if (options.autoFocus) beginFocusTimer(options.focusMinutes, options.now);
     const saved = saveState();
     if (saved === false) throw new Error("saveState returned false");
     renderTimeline();
     if (typeof renderHabits === "function") renderHabits();
+    if (typeof renderTimer === "function") renderTimer();
+    if (options.autoFocus && typeof setActiveView === "function") setActiveView("focus");
     if (els.timelineActivityStatus) els.timelineActivityStatus.textContent = successTitle;
     showReminderToast(successTitle, successBody);
     return true;
@@ -2158,6 +2404,7 @@ function applyActivityUiResult(result, successTitle, successBody) {
     state.activeActivitySessionId = previousActiveId;
     state.habitEntries = previousHabitEntries;
     state.syncUpdatedAt = previousSyncUpdatedAt;
+    Object.assign(state, previousTimer);
     renderTimeline();
     showReminderToast("保存失败", "实际活动记录没有保存，请稍后重试。");
     return false;
@@ -2170,11 +2417,16 @@ function startSelectedTaskActivity(now = Date.now()) {
   const isHabit = selectedValue.startsWith("habit:");
   const entityId = isHabit ? selectedValue.slice(6) : selectedValue;
   const entity = isHabit
-    ? (state.habits || []).find((item) => String(item?.id) === entityId && item.archivedAt === null && ["duration", "count"].includes(item.metricType))
+    ? (state.habits || []).find((item) => String(item?.id) === entityId && item.archivedAt === null && item.metricType === "duration")
     : (state.tasks || []).find((item) => String(item?.id) === entityId && !item.done);
   if (!activityApi || !entity) {
     renderTimelineTaskPicker();
     showReminderToast("无法开始执行", "请选择一个仍可执行的任务或习惯。");
+    return false;
+  }
+  const focusMinutes = isHabit ? getHabitFocusMinutes(entity, now) : state.selectedMinutes;
+  if (isHabit && focusMinutes <= 0) {
+    showReminderToast("今日目标已达成", `“${entity.title}”今天已经达标。`);
     return false;
   }
   const running = activityApi.getRunningActivitySession(state.activitySessions, state.activeActivitySessionId);
@@ -2190,10 +2442,10 @@ function startSelectedTaskActivity(now = Date.now()) {
   } else {
     const shouldSwitch = confirm(`当前正在进行“${running.title}”，是否结束当前活动并切换到“${entity.title}”？`);
     if (!shouldSwitch) return false;
-    const isShort = Number(now) - Number(running.startAt) < 60000;
-    const keepShort = !isShort || confirm("当前活动不足 1 分钟，是否保留这条实际记录？");
-    if (keepShort) {
-      result = (isHabit ? activityApi.switchHabitActivity : activityApi.switchTaskActivity)({
+    if (state.isRunning && typeof completeFocusSession === "function") {
+      const ended = completeFocusSession({ finishedAt: now, earlyEnd: true });
+      if (!ended) return false;
+      result = (isHabit ? activityApi.startHabitActivity : activityApi.startTaskActivity)({
         sessions: state.activitySessions,
         activeActivitySessionId: state.activeActivitySessionId,
         [isHabit ? "habit" : "task"]: entity,
@@ -2201,30 +2453,50 @@ function startSelectedTaskActivity(now = Date.now()) {
         idFactory: () => crypto.randomUUID(),
       });
     } else {
-      const cancelled = activityApi.cancelActivitySession({
-        sessions: state.activitySessions,
-        activeActivitySessionId: state.activeActivitySessionId,
-        now,
-      });
-      result = cancelled.ok ? (isHabit ? activityApi.startHabitActivity : activityApi.startTaskActivity)({
-        sessions: cancelled.sessions,
-        activeActivitySessionId: null,
-        [isHabit ? "habit" : "task"]: entity,
-        now,
-        idFactory: () => crypto.randomUUID(),
-      }) : cancelled;
+      const isShort = Number(now) - Number(running.startAt) < 60000;
+      const keepShort = !isShort || confirm("当前活动不足 1 分钟，是否保留这条实际记录？");
+      if (keepShort) {
+        result = (isHabit ? activityApi.switchHabitActivity : activityApi.switchTaskActivity)({
+          sessions: state.activitySessions,
+          activeActivitySessionId: state.activeActivitySessionId,
+          [isHabit ? "habit" : "task"]: entity,
+          now,
+          idFactory: () => crypto.randomUUID(),
+        });
+      } else {
+        const cancelled = activityApi.cancelActivitySession({
+          sessions: state.activitySessions,
+          activeActivitySessionId: state.activeActivitySessionId,
+          now,
+        });
+        result = cancelled.ok ? (isHabit ? activityApi.startHabitActivity : activityApi.startTaskActivity)({
+          sessions: cancelled.sessions,
+          activeActivitySessionId: null,
+          [isHabit ? "habit" : "task"]: entity,
+          now,
+          idFactory: () => crypto.randomUUID(),
+        }) : cancelled;
+      }
     }
   }
   if (!result?.ok) {
     showReminderToast("无法开始执行", "活动状态已经变化，请刷新后重试。");
     return false;
   }
-  return applyActivityUiResult(result, isHabit ? "习惯已开始" : "任务已开始", `正在记录“${entity.title}”。`);
+  return applyActivityUiResult(
+    result,
+    isHabit ? "习惯专注已开始" : "任务专注已开始",
+    `正在专注“${entity.title}”。`,
+    { autoFocus: true, focusMinutes, now }
+  );
 }
 
 function endCurrentTaskActivity(now = Date.now()) {
   const activityApi = globalThis.ActivitySessions;
   if (!activityApi) return false;
+  if (state.isRunning && typeof completeFocusSession === "function") {
+    return completeFocusSession({ finishedAt: now, earlyEnd: true });
+  }
   const completed = activityApi.completeActivitySession({
     sessions: state.activitySessions,
     activeActivitySessionId: state.activeActivitySessionId,
@@ -2321,9 +2593,15 @@ function renderTimeline(now = Date.now()) {
     card.className = "timeline-task-card is-actual-activity";
     const title = document.createElement("strong");
     title.textContent = String(entry.title || "未命名任务");
-    const taskExists = (state.tasks || []).some((task) => String(task?.id) === String(entry.taskId));
     const meta = document.createElement("span");
-    meta.textContent = taskExists ? "实际活动" : "实际活动 · 原任务已删除";
+    if (entry.type === "focus") {
+      meta.textContent = "自由专注";
+    } else if (entry.type === "habit") {
+      meta.textContent = "习惯执行";
+    } else {
+      const taskExists = (state.tasks || []).some((task) => String(task?.id) === String(entry.taskId));
+      meta.textContent = taskExists ? "实际活动" : "实际活动 · 原任务已删除";
+    }
     card.append(title, meta);
     item.append(time, card);
     els.timelineList.append(item);
@@ -3987,6 +4265,7 @@ function applyTheme() {
   root.style.setProperty("--soft", theme.soft);
   root.style.setProperty("--line", isMoon ? "#4a554c" : "#dddddd");
   document.body.dataset.theme = theme.id;
+  updateProfileAvatarTheme(theme.id);
 }
 
 function previewSkin(id) {
@@ -6038,7 +6317,135 @@ async function adoptDailyPlanPreview(adoptedAt) {
   }
 }
 
+function getProfileOverview(now = Date.now()) {
+  const timestamp = Number(now) || Date.now();
+  const today = new Date(timestamp);
+  const todayKey = dateKey(today);
+  const weekStartDate = getWeekStart(today);
+  const weekEnd = new Date(weekStartDate);
+  weekEnd.setDate(weekStartDate.getDate() + 7);
+  const weekStartAt = weekStartDate.getTime();
+  const weekEndAt = weekEnd.getTime();
+  const weekKeys = Array.from({ length: 7 }, (_, index) => {
+    const day = new Date(weekStartDate);
+    day.setDate(weekStartDate.getDate() + index);
+    return dateKey(day);
+  });
+  const weekFocusMinutes = weekKeys.reduce((total, key) => total + Math.max(0, Number(state.focusByDate?.[key]) || 0), 0);
+  const habits = globalThis.Habits;
+  const todayHabit = habits?.getHabitCompletionSummary?.(state.habits, state.habitEntries, todayKey)
+    || { scheduled: 0, completed: 0, rate: 0 };
+  const weekHabitDays = habits?.getHabitStatsRange?.(state.habits, state.habitEntries, weekKeys[0], weekKeys[6]) || [];
+  const weekHabitScheduled = weekHabitDays.reduce((total, day) => total + Number(day.scheduled || 0), 0);
+  const weekHabitCompleted = weekHabitDays.reduce((total, day) => total + Number(day.completed || 0), 0);
+  const completedActivities = (state.activitySessions || []).filter((session) => session?.status === "completed"
+    && Number(session.startAt) >= weekStartAt && Number(session.startAt) < weekEndAt);
+  const weekActivityMinutes = completedActivities.reduce((total, session) => total + Math.max(0, Number(session.minutes) || 0), 0);
+  let streak = 0;
+  const cursor = new Date(today);
+  while ((state.focusByDate?.[dateKey(cursor)] || 0) > 0) {
+    streak += 1;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  const todayFocusMinutes = Math.max(0, Number(state.focusByDate?.[todayKey]) || 0);
+  const running = globalThis.ActivitySessions?.getRunningActivitySession?.(state.activitySessions, state.activeActivitySessionId);
+  const encouragement = running
+    ? `“${String(running.title || "当前活动")}”正在进行，保持自己的节奏。`
+    : todayHabit.scheduled > 0 && todayHabit.completed === todayHabit.scheduled
+      ? "今天的习惯都已达标，给稳定前进的自己一点掌声。"
+      : todayFocusMinutes >= 60
+        ? "今天已经积累了一小时专注，记得留一点时间休息。"
+        : todayFocusMinutes > 0 || completedActivities.some((session) => dateKey(new Date(session.startAt)) === todayKey)
+          ? "今天已经迈出了一步，接下来继续做最重要的一件事。"
+          : "今天也从一件小事开始。";
+  return {
+    todayFocusMinutes,
+    todayHabit,
+    streak,
+    flames: Math.max(0, Number(state.flames) || 0),
+    encouragement,
+    weekFocusMinutes,
+    weekHabitScheduled,
+    weekHabitCompleted,
+    weekActivityCount: completedActivities.length,
+    weekActivityMinutes,
+  };
+}
+
+function getProfileAvatarTheme(themeId = previewThemeId || state.selectedTheme) {
+  if (themeId === "moon") return "night";
+  if (themeId === "tea") return "forest";
+  if (themeId === "plum") return "warm";
+  return "spring";
+}
+
+function updateProfileAvatarTheme(themeId = previewThemeId || state.selectedTheme) {
+  if (els.profileAvatar) els.profileAvatar.dataset.avatarTheme = getProfileAvatarTheme(themeId);
+}
+
+function closeProfileNameEditor() {
+  if (!els.profileNameForm || !els.profileNameEditButton) return;
+  els.profileNameForm.hidden = true;
+  els.profileNameEditButton.hidden = false;
+}
+
+function openProfileNameEditor() {
+  if (!els.profileNameForm || !els.profileNameEditButton || !els.profileNameInput) return false;
+  els.profileNameInput.value = normalizeProfileName(state.profileName);
+  els.profileNameEditButton.hidden = true;
+  els.profileNameForm.hidden = false;
+  els.profileNameInput.focus?.();
+  els.profileNameInput.select?.();
+  return true;
+}
+
+function saveProfileName(event) {
+  event?.preventDefault?.();
+  if (!els.profileNameInput) return false;
+  const previousName = state.profileName;
+  const previousSyncUpdatedAt = state.syncUpdatedAt;
+  state.profileName = normalizeProfileName(els.profileNameInput.value);
+  try {
+    const result = saveState();
+    if (result === false) throw new Error("saveState returned false");
+    renderProfileOverview(Date.now());
+    closeProfileNameEditor();
+    showReminderToast("用户名已保存", `你好，${state.profileName}。`);
+    return true;
+  } catch (error) {
+    console.error("Profile name save failed:", error);
+    state.profileName = previousName;
+    state.syncUpdatedAt = previousSyncUpdatedAt;
+    showReminderToast("保存失败", "用户名没有保存，请稍后重试。");
+    return false;
+  }
+}
+
+function renderProfileOverview(now = Date.now()) {
+  if (!els.profileTodayFocus) return;
+  const overview = getProfileOverview(now);
+  if (els.profileNameText) els.profileNameText.textContent = normalizeProfileName(state.profileName);
+  updateProfileAvatarTheme();
+  els.profileTodayFocus.textContent = String(overview.todayFocusMinutes);
+  els.profileHabitRate.textContent = overview.todayHabit.scheduled
+    ? `${Math.round(overview.todayHabit.rate * 100)}%`
+    : "—";
+  els.profileStreakDays.textContent = String(overview.streak);
+  els.profileFlames.textContent = String(overview.flames);
+  els.profileEncouragement.textContent = overview.encouragement;
+  els.profileWeekFocus.textContent = `${overview.weekFocusMinutes} 分钟`;
+  els.profileWeekHabit.textContent = overview.weekHabitScheduled
+    ? `${Math.round(overview.weekHabitCompleted / overview.weekHabitScheduled * 100)}%`
+    : "—";
+  els.profileWeekHabitDetail.textContent = overview.weekHabitScheduled
+    ? `${overview.weekHabitCompleted}/${overview.weekHabitScheduled} 次达标`
+    : "本周暂无安排";
+  els.profileWeekActivity.textContent = `${overview.weekActivityCount} 次`;
+  els.profileWeekActivityDetail.textContent = `${overview.weekActivityMinutes} 分钟`;
+}
+
 function renderHome() {
+  renderProfileOverview(Date.now());
   if (!els.homeTodayMinutes) return;
   renderDailyPlanMode();
   const now = new Date();
@@ -6297,29 +6704,106 @@ async function requestUsageStatsPermission() {
   await plugin.openSettings();
 }
 
-function setActiveView(viewName) {
-  activeView = viewName;
-  document.body.dataset.view = viewName;
-  els.views.forEach((view) => view.classList.toggle("is-active", view.dataset.view === viewName));
-  const primaryView = ["tasks", "timeline", "week", "ddl", "stats", "screenTime", "finance", "habits", "heatmap", "settings"].includes(viewName)
+function currentDocumentScrollTop() {
+  const profileView = els.views.find((view) => view.dataset.view === "profile");
+  return Math.max(
+    0,
+    Number(window.scrollY ?? document.scrollingElement?.scrollTop ?? 0) || 0,
+    Number(profileView?.scrollTop) || 0
+  );
+}
+
+function updateSourceBackButton() {
+  if (!els.sourceBackButton) return;
+  const visible = navigationSource === "profile" && activeView !== "profile";
+  els.sourceBackButton.hidden = !visible;
+  els.sourceBackButton.setAttribute("aria-hidden", String(!visible));
+}
+
+function clearNavigationSource() {
+  navigationSource = null;
+  navigationDestination = null;
+  profileHistoryArmed = false;
+  updateSourceBackButton();
+}
+
+function armProfileReturn(destination) {
+  profileScrollTop = currentDocumentScrollTop();
+  navigationSource = "profile";
+  navigationDestination = destination;
+  profileHistoryArmed = true;
+  try {
+    window.history?.pushState?.(null, "", window.location?.href || "");
+  } catch (error) {
+    console.warn("Navigation history entry unavailable:", error);
+  }
+}
+
+function restoreProfileScrollPosition() {
+  const restore = () => {
+    const profileView = els.views.find((view) => view.dataset.view === "profile");
+    if (profileView) {
+      profileView.scrollTop = profileScrollTop;
+      profileView.scrollTo?.({ top: profileScrollTop, left: 0, behavior: "auto" });
+    }
+    window.scrollTo?.({ top: profileScrollTop, left: 0, behavior: "auto" });
+  };
+  if (typeof window.requestAnimationFrame === "function") {
+    window.requestAnimationFrame(() => window.requestAnimationFrame(restore));
+  } else {
+    restore();
+  }
+}
+
+function returnToProfile() {
+  if (navigationSource !== "profile") return false;
+  clearNavigationSource();
+  setActiveView("profile", { preserveSource: true });
+  restoreProfileScrollPosition();
+  return true;
+}
+
+function handleSourceAwareBack(event) {
+  if (!returnToProfile()) return false;
+  event?.preventDefault?.();
+  return true;
+}
+
+function setActiveView(viewName, options = {}) {
+  const requestedView = String(viewName || "home");
+  const resolvedView = requestedView === "planner" ? "home" : requestedView;
+  if (options.source === "profile" && PROFILE_RETURN_DESTINATIONS.has(requestedView)) {
+    armProfileReturn(requestedView);
+  } else if (!options.preserveSource) {
+    clearNavigationSource();
+  }
+  activeView = resolvedView;
+  document.body.dataset.view = resolvedView;
+  els.views.forEach((view) => view.classList.toggle("is-active", view.dataset.view === resolvedView));
+  const primaryView = ["tasks", "timeline", "week", "ddl", "stats", "screenTime", "finance", "habits", "heatmap", "settings"].includes(resolvedView)
     ? "profile"
-    : viewName;
+    : resolvedView;
   els.navButtons.forEach((button) => {
     if (!button.classList.contains("nav-button")) return;
     button.classList.toggle("is-active", button.dataset.viewTarget === primaryView);
   });
-  if (viewName === "timeline") renderTimeline();
-  if (viewName === "week") renderWeekSchedule();
-  if (viewName === "ddl") renderDdl();
-  if (viewName === "memo") renderMemos();
-  if (viewName === "habits") renderHabits();
-  if (viewName === "settings") renderThemes();
-  if (viewName === "screenTime") loadUsageStats();
-  if (viewName === "finance") refreshPaymentAccess();
-  if (viewName === "home" || viewName === "profile") renderHome();
+  if (resolvedView === "timeline") renderTimeline();
+  if (resolvedView === "week") renderWeekSchedule();
+  if (resolvedView === "ddl") renderDdl();
+  if (resolvedView === "memo") renderMemos();
+  if (resolvedView === "habits") renderHabits();
+  if (resolvedView === "settings") renderThemes();
+  if (resolvedView === "screenTime") loadUsageStats();
+  if (resolvedView === "finance") refreshPaymentAccess();
+  if (resolvedView === "home" || resolvedView === "profile") renderHome();
+  updateSourceBackButton();
+  if (requestedView === "planner" && els.dailyPlanCard) {
+    window.requestAnimationFrame?.(() => els.dailyPlanCard.scrollIntoView?.({ block: "start", behavior: "auto" }));
+  }
 }
 
 els.startPauseButton.addEventListener("click", () => state.isRunning ? pauseTimer() : startTimer());
+els.finishFocusButton?.addEventListener("click", () => finishFocusEarly(Date.now()));
 els.timelineTaskSelect?.addEventListener("change", () => {
   const canStart = Boolean(els.timelineTaskSelect.value);
   els.timelineStartButton.disabled = !canStart;
@@ -6515,8 +6999,26 @@ els.nextWeekButton.addEventListener("click", () => {
 });
 
 els.navButtons.forEach((button) => {
-  button.addEventListener("click", () => setActiveView(button.dataset.viewTarget));
+  button.addEventListener("click", () => {
+    const target = button.dataset.viewTarget;
+    const fromProfileShortcut = Boolean(button.closest?.('[data-view="profile"]')) && PROFILE_RETURN_DESTINATIONS.has(target);
+    setActiveView(target, fromProfileShortcut ? { source: "profile" } : undefined);
+  });
 });
+
+els.sourceBackButton?.addEventListener("click", () => returnToProfile());
+els.profileNameEditButton?.addEventListener("click", openProfileNameEditor);
+els.profileNameCancelButton?.addEventListener("click", closeProfileNameEditor);
+els.profileNameForm?.addEventListener("submit", saveProfileName);
+els.profileAboutButton?.addEventListener("click", () => {
+  showReminderToast("关于自见", "一个把计划、行动、专注与习惯放在一起的本地生活工具。");
+});
+window.addEventListener?.("popstate", (event) => {
+  if (profileHistoryArmed) handleSourceAwareBack(event);
+});
+document.addEventListener?.("backbutton", handleSourceAwareBack);
+const capacitorAppPlugin = window.Capacitor?.Plugins?.App || window.Capacitor?.plugins?.App;
+capacitorAppPlugin?.addListener?.("backButton", handleSourceAwareBack);
 
 els.heatmapPalette.addEventListener("change", (event) => {
   state.heatmapPalette = event.target.value;
@@ -6764,6 +7266,9 @@ setWeather(state.weather || WEATHER_STATES[Math.floor(Math.random() * WEATHER_ST
 applySkin();
 applyFlower();
 applyTheme();
+if (state.isRunning && Number(state.endsAt) > Date.now()) {
+  tickHandle = window.setInterval(tick, 1000);
+}
 render();
 renderSyncAccount();
 setActiveView(activeView);

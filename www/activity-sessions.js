@@ -7,7 +7,7 @@
 
   const SESSION_STATUSES = new Set(["running", "completed", "cancelled"]);
   const END_REASONS = new Set(["manual", "switched", "cancelled", "recovered"]);
-  const SESSION_TYPES = new Set(["task", "habit"]);
+  const SESSION_TYPES = new Set(["task", "habit", "focus"]);
   const HABIT_METRIC_TYPES = new Set(["count", "duration"]);
 
   function timestamp(value) {
@@ -69,11 +69,13 @@
     void now;
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
     const id = stableId(raw.id);
-    const type = SESSION_TYPES.has(raw.type) ? raw.type : (stableId(raw.habitId) ? "habit" : "task");
+    const type = SESSION_TYPES.has(raw.type)
+      ? raw.type
+      : stableId(raw.habitId) ? "habit" : stableId(raw.taskId) ? "task" : "focus";
     const taskId = stableId(raw.taskId);
     const habitId = stableId(raw.habitId);
     const habitMetricType = HABIT_METRIC_TYPES.has(raw.habitMetricType) ? raw.habitMetricType : null;
-    if (!id || (type === "task" ? !taskId : !habitId || !habitMetricType)) return null;
+    if (!id || (type === "task" && !taskId) || (type === "habit" && (!habitId || !habitMetricType))) return null;
 
     const startAt = timestamp(raw.startAt);
     if (!Number.isFinite(startAt)) return null;
@@ -116,7 +118,7 @@
       id,
       type,
       taskId: type === "task" ? taskId : null,
-      title: stableString(raw.title, "未命名任务"),
+      title: stableString(raw.title, type === "focus" ? "自由专注" : "未命名任务"),
       color: stableString(raw.color, "sage") || "sage",
       startAt,
       endAt,
@@ -312,6 +314,40 @@
     };
   }
 
+  function startFreeFocusActivity(input = {}) {
+    const now = timestamp(input.now);
+    const sessions = normalizeActivitySessions(input.sessions, input.now);
+    const activeActivitySessionId = repairActiveActivitySessionId(sessions, input.activeActivitySessionId);
+    if (!Number.isFinite(now)) return unchangedResult(sessions, activeActivitySessionId, "INVALID_TIME");
+    if (getRunningActivitySession(sessions, activeActivitySessionId)) return unchangedResult(sessions, activeActivitySessionId, "ALREADY_RUNNING");
+    const id = createSessionId(input.idFactory, { id: "free-focus" }, now);
+    if (!id || sessions.some((session) => session.id === id)) return unchangedResult(sessions, activeActivitySessionId, "INVALID_ID");
+    const session = {
+      id,
+      type: "focus",
+      taskId: null,
+      title: stableString(input.title, "自由专注") || "自由专注",
+      color: stableString(input.color, "sage") || "sage",
+      startAt: now,
+      endAt: null,
+      minutes: 0,
+      status: "running",
+      endReason: null,
+      note: "",
+      focusSessionId: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    return {
+      ok: true,
+      changed: true,
+      reason: null,
+      sessions: [...sessions, session].sort(stableSessionSort),
+      activeActivitySessionId: id,
+      session: { ...session },
+    };
+  }
+
   function completeActivitySession(input = {}) {
     const now = timestamp(input.now);
     const sessions = normalizeActivitySessions(input.sessions, input.now);
@@ -331,6 +367,7 @@
       minutes: calculateMinutes(running.startAt, now),
       status: "completed",
       endReason: requestedReason,
+      focusSessionId: stableId(input.focusSessionId) || running.focusSessionId,
       updatedAt: Math.max(running.updatedAt, now),
     };
     if (completed.type === "habit") {
@@ -465,6 +502,7 @@
     getRunningActivitySession,
     startTaskActivity,
     startHabitActivity,
+    startFreeFocusActivity,
     completeActivitySession,
     cancelActivitySession,
     switchTaskActivity,

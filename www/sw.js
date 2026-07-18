@@ -1,15 +1,15 @@
-const CACHE_NAME = "zijian-focus-v57";
+const CACHE_NAME = "zijian-focus-v58";
 const ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=57",
-  "./fflate.min.js?v=57",
-  "./daily-planner.js?v=57",
-  "./activity-sessions.js?v=57",
-  "./habits.js?v=57",
-  "./app.js?v=57",
-  "./manifest.webmanifest?v=57",
-  "./icon.svg?v=57",
+  "./styles.css?v=58",
+  "./fflate.min.js?v=58",
+  "./daily-planner.js?v=58",
+  "./activity-sessions.js?v=58",
+  "./habits.js?v=58",
+  "./app.js?v=58",
+  "./manifest.webmanifest?v=58",
+  "./icon.svg?v=58",
 ];
 
 self.addEventListener("install", (event) => {

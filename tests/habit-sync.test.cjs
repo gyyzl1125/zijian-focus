@@ -77,8 +77,8 @@ function normalizeStateInHarness(state) {
 test("default state and browser load order include habit support", () => {
   assert.match(source, /habits:\s*\[\]/);
   assert.match(source, /habitEntries:\s*\[\]/);
-  const habitsIndex = indexSource.indexOf("habits.js?v=57");
-  const appIndex = indexSource.indexOf("app.js?v=57");
+  const habitsIndex = indexSource.indexOf("habits.js?v=58");
+  const appIndex = indexSource.indexOf("app.js?v=58");
   assert.ok(habitsIndex >= 0 && appIndex > habitsIndex);
 });
 

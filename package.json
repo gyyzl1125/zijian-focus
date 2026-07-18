@@ -4,6 +4,7 @@
   "private": true,
   "description": "自见专注与日程安卓应用原型",
   "scripts": {
+    "test": "node --test tests/*.test.cjs",
     "start": "python -m http.server 5174 --bind 0.0.0.0",
     "test:planner": "node --test tests/daily-planner.test.cjs",
     "test:planner-dom": "node --test tests/daily-planner-dom.test.cjs",
