@@ -110,6 +110,7 @@ const defaultState = {
   transactions: [],
   monthlyBudget: 0,
   dailyPlans: {},
+  profileName: "自见用户",
   deletions: { version: 1, tasks: {}, memos: {} },
 };
 
@@ -352,6 +353,22 @@ const els = {
   deadlineSprintAdoptButton: document.querySelector("#deadlineSprintAdoptButton"),
   deadlineSprintAdoptionMessage: document.querySelector("#deadlineSprintAdoptionMessage"),
   profileFlames: document.querySelector("#profileFlames"),
+  profileAvatar: document.querySelector("#profileAvatar"),
+  profileNameText: document.querySelector("#profileNameText"),
+  profileNameEditButton: document.querySelector("#profileNameEditButton"),
+  profileNameForm: document.querySelector("#profileNameForm"),
+  profileNameInput: document.querySelector("#profileNameInput"),
+  profileNameCancelButton: document.querySelector("#profileNameCancelButton"),
+  profileTodayFocus: document.querySelector("#profileTodayFocus"),
+  profileHabitRate: document.querySelector("#profileHabitRate"),
+  profileStreakDays: document.querySelector("#profileStreakDays"),
+  profileEncouragement: document.querySelector("#profileEncouragement"),
+  profileWeekFocus: document.querySelector("#profileWeekFocus"),
+  profileWeekHabit: document.querySelector("#profileWeekHabit"),
+  profileWeekHabitDetail: document.querySelector("#profileWeekHabitDetail"),
+  profileWeekActivity: document.querySelector("#profileWeekActivity"),
+  profileWeekActivityDetail: document.querySelector("#profileWeekActivityDetail"),
+  profileAboutButton: document.querySelector("#profileAboutButton"),
   usagePermissionCard: document.querySelector("#usagePermissionCard"),
   usagePermissionButton: document.querySelector("#usagePermissionButton"),
   usageRefreshButton: document.querySelector("#usageRefreshButton"),
@@ -538,6 +555,15 @@ function filterDeletedEntities(items, deletionMap) {
   });
 }
 
+function normalizeProfileName(value) {
+  const normalized = String(value ?? "")
+    .replace(/[\u0000-\u001f\u007f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 32);
+  return normalized || "自见用户";
+}
+
 function normalizeState() {
   const activityApi = globalThis.ActivitySessions;
   if (activityApi?.normalizeActivitySessions && activityApi?.repairActiveActivitySessionId) {
@@ -619,6 +645,7 @@ function normalizeState() {
     state.financeRulesVersion = 4;
   }
   state.monthlyBudget = Math.max(0, Number(state.monthlyBudget || 0));
+  state.profileName = normalizeProfileName(state.profileName);
   state.syncUpdatedAt = Math.max(0, Number(state.syncUpdatedAt || 0));
 }
 
@@ -4238,6 +4265,7 @@ function applyTheme() {
   root.style.setProperty("--soft", theme.soft);
   root.style.setProperty("--line", isMoon ? "#4a554c" : "#dddddd");
   document.body.dataset.theme = theme.id;
+  updateProfileAvatarTheme(theme.id);
 }
 
 function previewSkin(id) {
@@ -6289,7 +6317,135 @@ async function adoptDailyPlanPreview(adoptedAt) {
   }
 }
 
+function getProfileOverview(now = Date.now()) {
+  const timestamp = Number(now) || Date.now();
+  const today = new Date(timestamp);
+  const todayKey = dateKey(today);
+  const weekStartDate = getWeekStart(today);
+  const weekEnd = new Date(weekStartDate);
+  weekEnd.setDate(weekStartDate.getDate() + 7);
+  const weekStartAt = weekStartDate.getTime();
+  const weekEndAt = weekEnd.getTime();
+  const weekKeys = Array.from({ length: 7 }, (_, index) => {
+    const day = new Date(weekStartDate);
+    day.setDate(weekStartDate.getDate() + index);
+    return dateKey(day);
+  });
+  const weekFocusMinutes = weekKeys.reduce((total, key) => total + Math.max(0, Number(state.focusByDate?.[key]) || 0), 0);
+  const habits = globalThis.Habits;
+  const todayHabit = habits?.getHabitCompletionSummary?.(state.habits, state.habitEntries, todayKey)
+    || { scheduled: 0, completed: 0, rate: 0 };
+  const weekHabitDays = habits?.getHabitStatsRange?.(state.habits, state.habitEntries, weekKeys[0], weekKeys[6]) || [];
+  const weekHabitScheduled = weekHabitDays.reduce((total, day) => total + Number(day.scheduled || 0), 0);
+  const weekHabitCompleted = weekHabitDays.reduce((total, day) => total + Number(day.completed || 0), 0);
+  const completedActivities = (state.activitySessions || []).filter((session) => session?.status === "completed"
+    && Number(session.startAt) >= weekStartAt && Number(session.startAt) < weekEndAt);
+  const weekActivityMinutes = completedActivities.reduce((total, session) => total + Math.max(0, Number(session.minutes) || 0), 0);
+  let streak = 0;
+  const cursor = new Date(today);
+  while ((state.focusByDate?.[dateKey(cursor)] || 0) > 0) {
+    streak += 1;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  const todayFocusMinutes = Math.max(0, Number(state.focusByDate?.[todayKey]) || 0);
+  const running = globalThis.ActivitySessions?.getRunningActivitySession?.(state.activitySessions, state.activeActivitySessionId);
+  const encouragement = running
+    ? `“${String(running.title || "当前活动")}”正在进行，保持自己的节奏。`
+    : todayHabit.scheduled > 0 && todayHabit.completed === todayHabit.scheduled
+      ? "今天的习惯都已达标，给稳定前进的自己一点掌声。"
+      : todayFocusMinutes >= 60
+        ? "今天已经积累了一小时专注，记得留一点时间休息。"
+        : todayFocusMinutes > 0 || completedActivities.some((session) => dateKey(new Date(session.startAt)) === todayKey)
+          ? "今天已经迈出了一步，接下来继续做最重要的一件事。"
+          : "今天也从一件小事开始。";
+  return {
+    todayFocusMinutes,
+    todayHabit,
+    streak,
+    flames: Math.max(0, Number(state.flames) || 0),
+    encouragement,
+    weekFocusMinutes,
+    weekHabitScheduled,
+    weekHabitCompleted,
+    weekActivityCount: completedActivities.length,
+    weekActivityMinutes,
+  };
+}
+
+function getProfileAvatarTheme(themeId = previewThemeId || state.selectedTheme) {
+  if (themeId === "moon") return "night";
+  if (themeId === "tea") return "forest";
+  if (themeId === "plum") return "warm";
+  return "spring";
+}
+
+function updateProfileAvatarTheme(themeId = previewThemeId || state.selectedTheme) {
+  if (els.profileAvatar) els.profileAvatar.dataset.avatarTheme = getProfileAvatarTheme(themeId);
+}
+
+function closeProfileNameEditor() {
+  if (!els.profileNameForm || !els.profileNameEditButton) return;
+  els.profileNameForm.hidden = true;
+  els.profileNameEditButton.hidden = false;
+}
+
+function openProfileNameEditor() {
+  if (!els.profileNameForm || !els.profileNameEditButton || !els.profileNameInput) return false;
+  els.profileNameInput.value = normalizeProfileName(state.profileName);
+  els.profileNameEditButton.hidden = true;
+  els.profileNameForm.hidden = false;
+  els.profileNameInput.focus?.();
+  els.profileNameInput.select?.();
+  return true;
+}
+
+function saveProfileName(event) {
+  event?.preventDefault?.();
+  if (!els.profileNameInput) return false;
+  const previousName = state.profileName;
+  const previousSyncUpdatedAt = state.syncUpdatedAt;
+  state.profileName = normalizeProfileName(els.profileNameInput.value);
+  try {
+    const result = saveState();
+    if (result === false) throw new Error("saveState returned false");
+    renderProfileOverview(Date.now());
+    closeProfileNameEditor();
+    showReminderToast("用户名已保存", `你好，${state.profileName}。`);
+    return true;
+  } catch (error) {
+    console.error("Profile name save failed:", error);
+    state.profileName = previousName;
+    state.syncUpdatedAt = previousSyncUpdatedAt;
+    showReminderToast("保存失败", "用户名没有保存，请稍后重试。");
+    return false;
+  }
+}
+
+function renderProfileOverview(now = Date.now()) {
+  if (!els.profileTodayFocus) return;
+  const overview = getProfileOverview(now);
+  if (els.profileNameText) els.profileNameText.textContent = normalizeProfileName(state.profileName);
+  updateProfileAvatarTheme();
+  els.profileTodayFocus.textContent = String(overview.todayFocusMinutes);
+  els.profileHabitRate.textContent = overview.todayHabit.scheduled
+    ? `${Math.round(overview.todayHabit.rate * 100)}%`
+    : "—";
+  els.profileStreakDays.textContent = String(overview.streak);
+  els.profileFlames.textContent = String(overview.flames);
+  els.profileEncouragement.textContent = overview.encouragement;
+  els.profileWeekFocus.textContent = `${overview.weekFocusMinutes} 分钟`;
+  els.profileWeekHabit.textContent = overview.weekHabitScheduled
+    ? `${Math.round(overview.weekHabitCompleted / overview.weekHabitScheduled * 100)}%`
+    : "—";
+  els.profileWeekHabitDetail.textContent = overview.weekHabitScheduled
+    ? `${overview.weekHabitCompleted}/${overview.weekHabitScheduled} 次达标`
+    : "本周暂无安排";
+  els.profileWeekActivity.textContent = `${overview.weekActivityCount} 次`;
+  els.profileWeekActivityDetail.textContent = `${overview.weekActivityMinutes} 分钟`;
+}
+
 function renderHome() {
+  renderProfileOverview(Date.now());
   if (!els.homeTodayMinutes) return;
   renderDailyPlanMode();
   const now = new Date();
@@ -6549,7 +6705,12 @@ async function requestUsageStatsPermission() {
 }
 
 function currentDocumentScrollTop() {
-  return Math.max(0, Number(window.scrollY ?? document.scrollingElement?.scrollTop ?? 0) || 0);
+  const profileView = els.views.find((view) => view.dataset.view === "profile");
+  return Math.max(
+    0,
+    Number(window.scrollY ?? document.scrollingElement?.scrollTop ?? 0) || 0,
+    Number(profileView?.scrollTop) || 0
+  );
 }
 
 function updateSourceBackButton() {
@@ -6579,7 +6740,14 @@ function armProfileReturn(destination) {
 }
 
 function restoreProfileScrollPosition() {
-  const restore = () => window.scrollTo?.({ top: profileScrollTop, left: 0, behavior: "auto" });
+  const restore = () => {
+    const profileView = els.views.find((view) => view.dataset.view === "profile");
+    if (profileView) {
+      profileView.scrollTop = profileScrollTop;
+      profileView.scrollTo?.({ top: profileScrollTop, left: 0, behavior: "auto" });
+    }
+    window.scrollTo?.({ top: profileScrollTop, left: 0, behavior: "auto" });
+  };
   if (typeof window.requestAnimationFrame === "function") {
     window.requestAnimationFrame(() => window.requestAnimationFrame(restore));
   } else {
@@ -6839,6 +7007,12 @@ els.navButtons.forEach((button) => {
 });
 
 els.sourceBackButton?.addEventListener("click", () => returnToProfile());
+els.profileNameEditButton?.addEventListener("click", openProfileNameEditor);
+els.profileNameCancelButton?.addEventListener("click", closeProfileNameEditor);
+els.profileNameForm?.addEventListener("submit", saveProfileName);
+els.profileAboutButton?.addEventListener("click", () => {
+  showReminderToast("关于自见", "一个把计划、行动、专注与习惯放在一起的本地生活工具。");
+});
 window.addEventListener?.("popstate", (event) => {
   if (profileHistoryArmed) handleSourceAwareBack(event);
 });

@@ -90,6 +90,17 @@ test("old local state normalizes to empty activity fields", () => {
   const normalized = normalizeStateInHarness(state);
   assert.deepEqual(plain(normalized.activitySessions), []);
   assert.equal(normalized.activeActivitySessionId, null);
+  assert.equal(normalized.profileName, "自见用户");
+});
+
+test("profile name follows whole-state recency and remains cloud safe", () => {
+  const api = createSyncApi(baseState({ profileName: "本地名字" }));
+  const merged = api.mergeSyncedStates(
+    baseState({ profileName: "旧名字", syncUpdatedAt: 10 }),
+    baseState({ profileName: "新名字", syncUpdatedAt: 20 })
+  );
+  assert.equal(merged.profileName, "新名字");
+  assert.equal(api.cloudSafeState().profileName, "本地名字");
 });
 
 test("reload normalization preserves one running session and repairs its active id", () => {

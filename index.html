@@ -603,24 +603,74 @@
 
       <section class="app-view" id="profileView" data-view="profile" aria-label="我的">
         <section class="profile-page">
-          <div class="page-intro profile-intro">
-            <div><p class="eyebrow">Library</p><h1>全部功能</h1><p>日程、成长记录和偏好设置。</p></div>
-          </div>
-          <div class="profile-group"><h2>计划与日程</h2><div class="profile-grid">
-            <button type="button" data-view-target="tasks"><span>任务</span><small>添加与提醒</small></button>
-            <button type="button" data-view-target="planner"><span>今日编排</span><small>重点与专注时段</small></button>
-            <button type="button" data-view-target="timeline"><span>时间轴</span><small>今天的节奏</small></button>
-            <button type="button" data-view-target="week"><span>周日程</span><small>课程与安排</small></button>
-            <button type="button" data-view-target="ddl"><span>DDL</span><small>重要截止日</small></button>
-          </div></div>
-          <div class="profile-group"><h2>成长记录</h2><div class="profile-list">
-            <button type="button" data-view-target="stats"><span><strong>统计</strong><small>专注趋势与任务概览</small></span><b>›</b></button>
-            <button type="button" data-view-target="screenTime"><span><strong>屏幕使用</strong><small>应用时长与每日变化</small></span><b>›</b></button>
-            <button type="button" data-view-target="finance"><span><strong>我的账本</strong><small>预算、分类与消费分析</small></span><b>›</b></button>
-            <button type="button" data-view-target="habits"><span><strong>习惯与今日打卡</strong><small>重复行为、本周安排和完成进度</small></span><b>›</b></button>
-            <button type="button" data-view-target="heatmap"><span><strong>热力图与装扮</strong><small>火苗、皮肤和花朵</small></span><b>›</b></button>
-            <button type="button" data-view-target="settings"><span><strong>设置与数据</strong><small>主题、轮播和本地备份</small></span><b>›</b></button>
-          </div></div>
+          <article class="profile-identity-card">
+            <div class="profile-identity-main">
+              <span class="profile-avatar" id="profileAvatar" data-avatar-theme="spring" aria-hidden="true">
+                <svg viewBox="0 0 64 64" focusable="false">
+                  <g data-avatar-scene="spring"><path class="avatar-ground" d="M12 48c7-7 33-7 40 0v7H12z"/><path class="avatar-stem" d="M32 47V29"/><path class="avatar-leaf" d="M31 38c-10 1-13-8-13-8 9-2 14 2 13 8Z"/><path class="avatar-leaf" d="M33 34c9 0 12-8 12-8-8-2-13 2-12 8Z"/><g class="avatar-flower"><circle cx="32" cy="15" r="5"/><circle cx="39" cy="20" r="5"/><circle cx="36" cy="27" r="5"/><circle cx="28" cy="27" r="5"/><circle cx="25" cy="20" r="5"/></g><circle class="avatar-flower-core" cx="32" cy="22" r="4"/></g>
+                  <g data-avatar-scene="forest"><path class="avatar-moss" d="M9 48c4-8 10-8 15-4 5-9 17-9 21 0 5-3 10-1 12 5v7H9z"/><path class="avatar-stem" d="M31 47c0-13 4-22 12-29"/><path class="avatar-leaf" d="M34 34c-11 1-15-8-15-8 10-3 16 1 15 8Z"/><path class="avatar-leaf avatar-leaf-deep" d="M37 29c10 0 15-9 15-9-10-3-16 1-15 9Z"/><circle class="avatar-dot" cx="20" cy="47" r="2"/><circle class="avatar-dot" cx="48" cy="45" r="2.5"/></g>
+                  <g data-avatar-scene="night"><circle class="avatar-moon" cx="37" cy="23" r="13"/><circle class="avatar-moon-cut" cx="43" cy="18" r="12"/><path class="avatar-night-ground" d="M8 50c10-8 37-8 48 0v7H8z"/><path class="avatar-grass" d="M20 51c1-9 5-13 5-13-1 8 1 13 1 13m7 0c0-12 5-18 5-18-2 11 1 18 1 18m6 0c0-7 4-11 4-11-1 7 1 11 1 11"/><circle class="avatar-star" cx="18" cy="20" r="2"/><circle class="avatar-star" cx="50" cy="32" r="1.5"/></g>
+                  <g data-avatar-scene="warm"><path class="avatar-pot-rim" d="M18 39h28l-2 7H20z"/><path class="avatar-pot" d="M22 45h20l-3 12H25z"/><path class="avatar-stem" d="M32 39V22"/><path class="avatar-leaf" d="M31 34c-9 0-12-7-12-7 8-2 13 1 12 7Z"/><g class="avatar-sunflower"><circle cx="32" cy="10" r="5"/><circle cx="39" cy="14" r="5"/><circle cx="39" cy="21" r="5"/><circle cx="25" cy="21" r="5"/><circle cx="25" cy="14" r="5"/></g><circle class="avatar-sunflower-core" cx="32" cy="17" r="5"/></g>
+                </svg>
+              </span>
+              <div class="profile-identity-copy">
+                <p class="eyebrow">My space</p>
+                <button class="profile-name-button" id="profileNameEditButton" type="button" aria-label="编辑用户名"><span id="profileNameText">自见用户</span><span aria-hidden="true">✎</span></button>
+                <form class="profile-name-form" id="profileNameForm" hidden>
+                  <label class="sr-only" for="profileNameInput">用户名</label>
+                  <input id="profileNameInput" type="text" maxlength="32" autocomplete="nickname" placeholder="自见用户" />
+                  <button type="submit">保存</button><button id="profileNameCancelButton" type="button">取消</button>
+                </form>
+                <p class="profile-signature">把时间过成自己喜欢的样子。</p>
+              </div>
+            </div>
+            <div class="profile-today-metrics" aria-label="今日概览">
+              <div><span>今日专注</span><strong id="profileTodayFocus">0</strong><small>分钟</small></div>
+              <div><span>习惯完成</span><strong id="profileHabitRate">—</strong><small>今日</small></div>
+              <div><span>连续天数</span><strong id="profileStreakDays">0</strong><small>天</small></div>
+              <div><span>火苗</span><strong id="profileFlames">0</strong><small>可用</small></div>
+            </div>
+            <p class="profile-encouragement" id="profileEncouragement" aria-live="polite">今天也从一件小事开始。</p>
+          </article>
+
+          <section class="profile-section" aria-labelledby="profileShortcutTitle">
+            <div class="profile-section-head"><div><p class="eyebrow">Quick access</p><h2 id="profileShortcutTitle">快捷入口</h2></div></div>
+            <div class="profile-shortcuts">
+              <button type="button" data-view-target="timeline"><span aria-hidden="true">◷</span><strong>时间轴</strong><small>实际行动</small></button>
+              <button type="button" data-view-target="week"><span aria-hidden="true">▦</span><strong>周日程</strong><small>本周计划</small></button>
+              <button type="button" data-view-target="ddl"><span aria-hidden="true">⌛</span><strong>DDL</strong><small>截止事项</small></button>
+              <button type="button" data-view-target="planner"><span aria-hidden="true">✦</span><strong>今日编排</strong><small>安排重点</small></button>
+              <button type="button" data-view-target="tasks"><span aria-hidden="true">✓</span><strong>任务</strong><small>待办清单</small></button>
+              <button type="button" data-view-target="habits"><span aria-hidden="true">◎</span><strong>习惯</strong><small>今日打卡</small></button>
+            </div>
+          </section>
+
+          <section class="profile-section" aria-labelledby="profileGrowthTitle">
+            <div class="profile-section-head"><div><p class="eyebrow">This week</p><h2 id="profileGrowthTitle">成长概览</h2></div><small>实时统计</small></div>
+            <div class="profile-growth-grid">
+              <button type="button" data-view-target="stats"><span>本周专注</span><strong id="profileWeekFocus">0 分钟</strong><small>查看专注统计</small></button>
+              <button type="button" data-view-target="habits"><span>本周习惯</span><strong id="profileWeekHabit">—</strong><small id="profileWeekHabitDetail">暂无安排</small></button>
+              <button type="button" data-view-target="timeline"><span>本周实际行动</span><strong id="profileWeekActivity">0 次</strong><small id="profileWeekActivityDetail">0 分钟</small></button>
+            </div>
+          </section>
+
+          <section class="profile-section" aria-labelledby="profileSettingsTitle">
+            <div class="profile-section-head"><div><p class="eyebrow">Preferences</p><h2 id="profileSettingsTitle">设置</h2></div></div>
+            <div class="profile-setting-list">
+              <button type="button" data-view-target="heatmap"><span aria-hidden="true">◈</span><span><strong>个性化</strong><small>主题、皮肤与花朵</small></span><b aria-hidden="true">›</b></button>
+              <button type="button" data-view-target="tasks"><span aria-hidden="true">◉</span><span><strong>提醒</strong><small>任务通知与系统权限</small></span><b aria-hidden="true">›</b></button>
+              <button type="button" data-view-target="settings"><span aria-hidden="true">⇄</span><span><strong>数据与同步</strong><small>账号、备份与导入</small></span><b aria-hidden="true">›</b></button>
+              <button type="button" id="profileAboutButton"><span aria-hidden="true">i</span><span><strong>关于</strong><small>自见与版本说明</small></span><b aria-hidden="true">›</b></button>
+            </div>
+          </section>
+
+          <section class="profile-section profile-tools" aria-labelledby="profileToolsTitle">
+            <div class="profile-section-head"><div><p class="eyebrow">Tools</p><h2 id="profileToolsTitle">更多工具</h2></div></div>
+            <div class="profile-tool-grid">
+              <button type="button" data-view-target="screenTime"><strong>屏幕使用</strong><small>应用时长与变化</small></button>
+              <button type="button" data-view-target="finance"><strong>我的账本</strong><small>预算与消费分析</small></button>
+            </div>
+          </section>
         </section>
       </section>
     </main>

@@ -85,6 +85,19 @@ test("a profile shortcut shows one accessible return control and returns to prof
   assert.equal(harness.scrollCalls.at(-1)?.behavior, "auto");
 });
 
+test("profile scroll restoration also supports the mobile view scroll container", () => {
+  const harness = createHarness({ scrollTop: 0 });
+  const profileView = harness.document.querySelector('[data-view="profile"]');
+  const viewScrollCalls = [];
+  profileView.scrollTop = 360;
+  profileView.scrollTo = (options) => viewScrollCalls.push(options);
+  harness.api.setActiveView("week", { source: "profile" });
+  profileView.scrollTop = 0;
+  assert.equal(harness.api.returnToProfile(), true);
+  assert.equal(profileView.scrollTop, 360);
+  assert.equal(viewScrollCalls.at(-1)?.top, 360);
+});
+
 test("ordinary and bottom-navigation entries clear the in-memory source", () => {
   const harness = createHarness();
   harness.api.setActiveView("week", { source: "profile" });
