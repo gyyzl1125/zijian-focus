@@ -19,6 +19,10 @@
         </div>
       </header>
 
+      <button class="source-back-button" id="sourceBackButton" type="button" aria-label="返回我的" hidden>
+        <span aria-hidden="true">←</span><span>返回我的</span>
+      </button>
+
       <section class="app-view is-active" id="homeView" data-view="home" aria-label="首页">
         <section class="home-dashboard">
           <div class="home-date-header">
@@ -604,6 +608,7 @@
           </div>
           <div class="profile-group"><h2>计划与日程</h2><div class="profile-grid">
             <button type="button" data-view-target="tasks"><span>任务</span><small>添加与提醒</small></button>
+            <button type="button" data-view-target="planner"><span>今日编排</span><small>重点与专注时段</small></button>
             <button type="button" data-view-target="timeline"><span>时间轴</span><small>今天的节奏</small></button>
             <button type="button" data-view-target="week"><span>周日程</span><small>课程与安排</small></button>
             <button type="button" data-view-target="ddl"><span>DDL</span><small>重要截止日</small></button>

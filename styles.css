@@ -51,6 +51,29 @@ body {
   margin-bottom: 14px;
 }
 
+.source-back-button {
+  position: sticky;
+  top: max(8px, env(safe-area-inset-top));
+  z-index: 18;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 44px;
+  min-height: 44px;
+  margin: 0 0 10px;
+  padding: 0 14px;
+  border: 1px solid rgba(72, 91, 77, 0.1);
+  border-radius: 15px;
+  background: color-mix(in srgb, var(--card), transparent 4%);
+  color: var(--text);
+  box-shadow: var(--shadow-soft);
+  font: inherit;
+  font-weight: 800;
+  backdrop-filter: blur(14px);
+}
+
+.source-back-button[hidden] { display: none; }
+
 .streak-pill {
   min-height: 44px;
   padding: 6px 10px;

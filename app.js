@@ -230,6 +230,7 @@ const els = {
   streakHint: document.querySelector("#streakHint"),
   views: [...document.querySelectorAll(".app-view")],
   navButtons: [...document.querySelectorAll(".nav-button, [data-view-target]")],
+  sourceBackButton: document.querySelector("#sourceBackButton"),
   weekStrip: document.querySelector("#weekStrip"),
   timelineDateTitle: document.querySelector("#timelineDateTitle"),
   timelineStats: document.querySelector("#timelineStats"),
@@ -421,6 +422,11 @@ const els = {
 };
 
 let activeView = "home";
+const PROFILE_RETURN_DESTINATIONS = new Set(["timeline", "week", "ddl", "planner", "tasks", "habits"]);
+let navigationSource = null;
+let navigationDestination = null;
+let profileScrollTop = 0;
+let profileHistoryArmed = false;
 let selectedTimelineDate = dateKey();
 let selectedWeekDate = dateKey();
 let weekShiftInProgress = false;
@@ -6542,26 +6548,90 @@ async function requestUsageStatsPermission() {
   await plugin.openSettings();
 }
 
-function setActiveView(viewName) {
-  activeView = viewName;
-  document.body.dataset.view = viewName;
-  els.views.forEach((view) => view.classList.toggle("is-active", view.dataset.view === viewName));
-  const primaryView = ["tasks", "timeline", "week", "ddl", "stats", "screenTime", "finance", "habits", "heatmap", "settings"].includes(viewName)
+function currentDocumentScrollTop() {
+  return Math.max(0, Number(window.scrollY ?? document.scrollingElement?.scrollTop ?? 0) || 0);
+}
+
+function updateSourceBackButton() {
+  if (!els.sourceBackButton) return;
+  const visible = navigationSource === "profile" && activeView !== "profile";
+  els.sourceBackButton.hidden = !visible;
+  els.sourceBackButton.setAttribute("aria-hidden", String(!visible));
+}
+
+function clearNavigationSource() {
+  navigationSource = null;
+  navigationDestination = null;
+  profileHistoryArmed = false;
+  updateSourceBackButton();
+}
+
+function armProfileReturn(destination) {
+  profileScrollTop = currentDocumentScrollTop();
+  navigationSource = "profile";
+  navigationDestination = destination;
+  profileHistoryArmed = true;
+  try {
+    window.history?.pushState?.(null, "", window.location?.href || "");
+  } catch (error) {
+    console.warn("Navigation history entry unavailable:", error);
+  }
+}
+
+function restoreProfileScrollPosition() {
+  const restore = () => window.scrollTo?.({ top: profileScrollTop, left: 0, behavior: "auto" });
+  if (typeof window.requestAnimationFrame === "function") {
+    window.requestAnimationFrame(() => window.requestAnimationFrame(restore));
+  } else {
+    restore();
+  }
+}
+
+function returnToProfile() {
+  if (navigationSource !== "profile") return false;
+  clearNavigationSource();
+  setActiveView("profile", { preserveSource: true });
+  restoreProfileScrollPosition();
+  return true;
+}
+
+function handleSourceAwareBack(event) {
+  if (!returnToProfile()) return false;
+  event?.preventDefault?.();
+  return true;
+}
+
+function setActiveView(viewName, options = {}) {
+  const requestedView = String(viewName || "home");
+  const resolvedView = requestedView === "planner" ? "home" : requestedView;
+  if (options.source === "profile" && PROFILE_RETURN_DESTINATIONS.has(requestedView)) {
+    armProfileReturn(requestedView);
+  } else if (!options.preserveSource) {
+    clearNavigationSource();
+  }
+  activeView = resolvedView;
+  document.body.dataset.view = resolvedView;
+  els.views.forEach((view) => view.classList.toggle("is-active", view.dataset.view === resolvedView));
+  const primaryView = ["tasks", "timeline", "week", "ddl", "stats", "screenTime", "finance", "habits", "heatmap", "settings"].includes(resolvedView)
     ? "profile"
-    : viewName;
+    : resolvedView;
   els.navButtons.forEach((button) => {
     if (!button.classList.contains("nav-button")) return;
     button.classList.toggle("is-active", button.dataset.viewTarget === primaryView);
   });
-  if (viewName === "timeline") renderTimeline();
-  if (viewName === "week") renderWeekSchedule();
-  if (viewName === "ddl") renderDdl();
-  if (viewName === "memo") renderMemos();
-  if (viewName === "habits") renderHabits();
-  if (viewName === "settings") renderThemes();
-  if (viewName === "screenTime") loadUsageStats();
-  if (viewName === "finance") refreshPaymentAccess();
-  if (viewName === "home" || viewName === "profile") renderHome();
+  if (resolvedView === "timeline") renderTimeline();
+  if (resolvedView === "week") renderWeekSchedule();
+  if (resolvedView === "ddl") renderDdl();
+  if (resolvedView === "memo") renderMemos();
+  if (resolvedView === "habits") renderHabits();
+  if (resolvedView === "settings") renderThemes();
+  if (resolvedView === "screenTime") loadUsageStats();
+  if (resolvedView === "finance") refreshPaymentAccess();
+  if (resolvedView === "home" || resolvedView === "profile") renderHome();
+  updateSourceBackButton();
+  if (requestedView === "planner" && els.dailyPlanCard) {
+    window.requestAnimationFrame?.(() => els.dailyPlanCard.scrollIntoView?.({ block: "start", behavior: "auto" }));
+  }
 }
 
 els.startPauseButton.addEventListener("click", () => state.isRunning ? pauseTimer() : startTimer());
@@ -6761,8 +6831,20 @@ els.nextWeekButton.addEventListener("click", () => {
 });
 
 els.navButtons.forEach((button) => {
-  button.addEventListener("click", () => setActiveView(button.dataset.viewTarget));
+  button.addEventListener("click", () => {
+    const target = button.dataset.viewTarget;
+    const fromProfileShortcut = Boolean(button.closest?.('[data-view="profile"]')) && PROFILE_RETURN_DESTINATIONS.has(target);
+    setActiveView(target, fromProfileShortcut ? { source: "profile" } : undefined);
+  });
 });
+
+els.sourceBackButton?.addEventListener("click", () => returnToProfile());
+window.addEventListener?.("popstate", (event) => {
+  if (profileHistoryArmed) handleSourceAwareBack(event);
+});
+document.addEventListener?.("backbutton", handleSourceAwareBack);
+const capacitorAppPlugin = window.Capacitor?.Plugins?.App || window.Capacitor?.plugins?.App;
+capacitorAppPlugin?.addListener?.("backButton", handleSourceAwareBack);
 
 els.heatmapPalette.addEventListener("change", (event) => {
   state.heatmapPalette = event.target.value;
