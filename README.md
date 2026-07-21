@@ -33,13 +33,17 @@
 
 Codex 不作为应用运行时依赖。应用不会把任务、习惯或个人记录发送给 OpenAI，也不会在运行时调用 GPT、OpenAI API 或 Edge Function。
 
-## 截图
+## 界面预览
 
-> 截图占位：发布 GitHub Release 前补充首页 / 每日编排、移动端周日程、时间轴、习惯统计和“我的”页面截图。
+| 个人主页 | 任务联动专注 |
+| --- | --- |
+| <img src="docs/screenshots/profile.png" alt="个人主页" width="320"> | <img src="docs/screenshots/focus.png" alt="任务联动专注" width="320"> |
+| 汇总今日状态、成长数据与常用功能入口。 | 从任务或时长习惯进入专注，并实时呈现目标进度。 |
 
-| 首页与编排 | 周日程与时间轴 | 习惯与统计 |
-| --- | --- | --- |
-| 待补充 | 待补充 | 待补充 |
+| 周日程 | 习惯追踪 |
+| --- | --- |
+| <img src="docs/screenshots/week.png" alt="移动端周日程" width="320"> | <img src="docs/screenshots/habits.png" alt="习惯追踪" width="320"> |
+| 通过日期条浏览本周计划与不同类型的日程事项。 | 记录每日习惯，并查看完成率、连续天数与本周概览。 |
 
 ## Web 运行
 
